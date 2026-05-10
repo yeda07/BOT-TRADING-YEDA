@@ -18,6 +18,7 @@ Desde la raíz del repositorio:
 cd bot-trading
 python -m venv .venv
 .venv\Scripts\activate
+cd bot-trading
 pip install -r requirements.txt
 copy .env.example .env
 ```
@@ -25,7 +26,7 @@ copy .env.example .env
 Para verificar la instalación:
 
 ```bash
-pytest
+python -m pytest -p no:cacheprovider --basetemp=.tmp_pytest -q
 ```
 
 ## Configuración
