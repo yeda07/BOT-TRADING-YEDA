@@ -81,7 +81,7 @@ def backtest(request: BacktestRequest) -> dict:
 def train(request: TrainRequest) -> dict[str, float]:
     try:
         candles = load_candles_csv(request.csv_path)
-        validate_candles(candles, min_rows=100)
+        validate_candles(candles, min_rows=settings.MIN_CANDLES)
         metrics = train_model(candles, output_path=request.output_path)
         logger.info("ML model trained and stored at %s", request.output_path)
         return metrics
@@ -161,7 +161,9 @@ if __name__ == "__main__":
         run_backtest_cli(args.csv, args.output)
     elif args.command == "train":
         output = args.output or "models/model.joblib"
-        metrics = train_model(load_candles_csv(args.csv), output)
+        candles = load_candles_csv(args.csv)
+        validate_candles(candles, min_rows=settings.MIN_CANDLES)
+        metrics = train_model(candles, output)
         print(pd.Series(metrics).to_string())
     else:
         run_compare_cli(args.csv, args.model)

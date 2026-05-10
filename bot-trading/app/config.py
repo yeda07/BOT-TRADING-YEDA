@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     MAX_DAILY_LOSS_PCT: float = 0.05
     MIN_MODEL_CONFIDENCE: float = 0.58
 
-    MIN_CANDLES: int = 50
+    MIN_CANDLES: int = 200
     MAX_VOLATILITY_MULTIPLIER: float = 3.0
     LATERAL_MARKET_ADX_THRESHOLD: float = 18.0
 

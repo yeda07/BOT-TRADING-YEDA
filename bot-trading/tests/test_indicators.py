@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from app.market.candles import validate_candles
+from app.market.candles import load_candles_csv, validate_candles
 from app.market.indicators import add_indicators, rsi
 
 
@@ -34,3 +34,47 @@ def test_candles_require_volume_column():
     candles = sample_candles().drop(columns=["volume"])
     with pytest.raises(ValueError, match="volume"):
         validate_candles(candles)
+
+
+def test_validate_candles_requires_datetime_timestamp():
+    candles = sample_candles(200)
+    candles["timestamp"] = candles["timestamp"].astype(str)
+    with pytest.raises(ValueError, match="datetime"):
+        validate_candles(candles)
+
+
+def test_validate_candles_requires_chronological_order():
+    candles = sample_candles(200)
+    candles = candles.sort_values("timestamp", ascending=False).reset_index(drop=True)
+    with pytest.raises(ValueError, match="ordered"):
+        validate_candles(candles)
+
+
+def test_validate_candles_requires_minimum_200_rows():
+    candles = sample_candles(199)
+    with pytest.raises(ValueError, match="200"):
+        validate_candles(candles)
+
+
+def test_load_candles_rejects_empty_prices(tmp_path):
+    csv_path = tmp_path / "candles.csv"
+    csv_path.write_text(
+        "timestamp,open,high,low,close,volume\n"
+        "2026-01-01T00:00:00Z,100,101,99,100.5,1000\n"
+        "2026-01-01T00:01:00Z,,102,100,101.5,1000\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="prices"):
+        load_candles_csv(csv_path)
+
+
+def test_load_candles_rejects_unsorted_timestamps(tmp_path):
+    csv_path = tmp_path / "candles.csv"
+    csv_path.write_text(
+        "timestamp,open,high,low,close,volume\n"
+        "2026-01-01T00:01:00Z,101,102,100,101.5,1000\n"
+        "2026-01-01T00:00:00Z,100,101,99,100.5,1000\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="ordered"):
+        load_candles_csv(csv_path)
