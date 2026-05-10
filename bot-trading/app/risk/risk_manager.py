@@ -21,6 +21,7 @@ class RiskDecision:
 class RiskManager:
     def __init__(
         self,
+        balance: float = 1000.0,
         risk_per_trade: float = 0.01,
         max_consecutive_losses: int = 3,
         max_daily_loss_pct: float = 0.05,
@@ -29,13 +30,41 @@ class RiskManager:
         max_volatility_multiplier: float = 3.0,
         lateral_market_adx_threshold: float = 18.0,
     ) -> None:
-        self.risk_per_trade = risk_per_trade
+        self.initial_balance = balance
+        self.balance = balance
+        self.daily_pnl = 0.0
+        self.consecutive_losses = 0
+        self.risk_per_trade = min(risk_per_trade, 0.01)
         self.max_consecutive_losses = max_consecutive_losses
         self.max_daily_loss_pct = max_daily_loss_pct
         self.min_model_confidence = min_model_confidence
         self.min_candles = min_candles
         self.max_volatility_multiplier = max_volatility_multiplier
         self.lateral_market_adx_threshold = lateral_market_adx_threshold
+
+    def can_trade(self) -> bool:
+        if self.consecutive_losses >= self.max_consecutive_losses:
+            return False
+        if self.daily_pnl <= -(self.initial_balance * self.max_daily_loss_pct):
+            return False
+        if self.balance <= 0:
+            return False
+        return True
+
+    def get_position_size(self) -> float:
+        if not self.can_trade():
+            return 0.0
+        return max(0.0, self.balance * self.risk_per_trade)
+
+    def register_result(self, profit: float) -> None:
+        self.balance += profit
+        self.daily_pnl += profit
+        self.consecutive_losses = self.consecutive_losses + 1 if profit < 0 else 0
+
+    def reset_daily_limits(self) -> None:
+        self.daily_pnl = 0.0
+        self.consecutive_losses = 0
+        self.initial_balance = self.balance
 
     def evaluate(
         self,
@@ -73,4 +102,3 @@ class RiskManager:
         state.daily_pnl += pnl
         state.consecutive_losses = state.consecutive_losses + 1 if pnl < 0 else 0
         return state
-
