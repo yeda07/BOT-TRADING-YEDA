@@ -20,7 +20,7 @@ timestamp,open,high,low,close,volume
 2026-01-01T00:00:00Z,100,101,99,100.5,1000
 ```
 
-`volume` es opcional y se rellena con `0`.
+El archivo base esperado es `data/raw/candles.csv` y debe incluir todas esas columnas.
 
 ## Instalación
 

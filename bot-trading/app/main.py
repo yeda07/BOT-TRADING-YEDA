@@ -41,8 +41,8 @@ def make_risk_manager() -> RiskManager:
     return RiskManager(
         risk_per_trade=settings.RISK_PER_TRADE,
         max_consecutive_losses=settings.MAX_CONSECUTIVE_LOSSES,
-        max_daily_loss_pct=settings.MAX_DAILY_LOSS_PCT,
-        min_model_confidence=settings.MIN_MODEL_CONFIDENCE,
+        max_daily_loss_pct=settings.MAX_DAILY_LOSS,
+        min_model_confidence=settings.MIN_CONFIDENCE,
         min_candles=settings.MIN_CANDLES,
         max_volatility_multiplier=settings.MAX_VOLATILITY_MULTIPLIER,
         lateral_market_adx_threshold=settings.LATERAL_MARKET_ADX_THRESHOLD,
@@ -64,6 +64,7 @@ def backtest(request: BacktestRequest) -> dict:
             strategy=RuleBasedStrategy(),
             risk_manager=make_risk_manager(),
             initial_balance=request.initial_balance or settings.INITIAL_BALANCE,
+            payout=settings.PAYOUT,
             logger=logger,
             strategy_name="rule_based",
         )
@@ -99,6 +100,7 @@ def compare_strategies(request: CompareRequest) -> dict:
             model_path=request.model_path,
             risk_manager_factory=make_risk_manager,
             initial_balance=request.initial_balance or settings.INITIAL_BALANCE,
+            payout=settings.PAYOUT,
             logger=logger,
         )
         saved = save_trades(trades) if request.save_to_db else 0
@@ -120,6 +122,7 @@ def run_backtest_cli(csv_path: str, output_csv: str | None = None) -> None:
         RuleBasedStrategy(),
         make_risk_manager(),
         settings.INITIAL_BALANCE,
+        payout=settings.PAYOUT,
         logger=logger,
         strategy_name="rule_based",
     )
@@ -138,6 +141,7 @@ def run_compare_cli(csv_path: str, model_path: str) -> None:
         model_path=model_path,
         risk_manager_factory=make_risk_manager,
         initial_balance=settings.INITIAL_BALANCE,
+        payout=settings.PAYOUT,
         logger=logger,
     )
     print(pd.Series(comparison.to_dict()).to_string())

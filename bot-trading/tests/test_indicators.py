@@ -1,5 +1,7 @@
 import pandas as pd
+import pytest
 
+from app.market.candles import validate_candles
 from app.market.indicators import add_indicators, rsi
 
 
@@ -27,3 +29,8 @@ def test_add_indicators_columns():
     for column in ["sma_fast", "sma_slow", "rsi", "macd", "atr", "adx"]:
         assert column in result.columns
 
+
+def test_candles_require_volume_column():
+    candles = sample_candles().drop(columns=["volume"])
+    with pytest.raises(ValueError, match="volume"):
+        validate_candles(candles)
