@@ -4,12 +4,15 @@ import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.brokers.paper_broker import PaperBroker
 from app.config import get_settings
+from app.execution.executor import Executor
 from app.execution.backtester import Backtester
 from app.execution.comparison import compare_rule_vs_ml
 from app.market.candles import load_candles_csv, validate_candles
+from app.market.features import build_features
 from app.ml.train import train_model
-from app.risk.risk_manager import RiskManager
+from app.risk.risk_manager import RiskManager, RiskState
 from app.storage.database import save_trades
 from app.strategies.rule_based import RuleBasedStrategy
 from app.utils.logger import setup_logger
@@ -32,7 +35,7 @@ class TrainRequest(BaseModel):
 
 class CompareRequest(BaseModel):
     csv_path: str
-    model_path: str = "models/model.joblib"
+    model_path: str = "models/best_model.joblib"
     initial_balance: float | None = None
     save_to_db: bool = True
 
@@ -79,7 +82,7 @@ def backtest(request: BacktestRequest) -> dict:
 
 
 @app.post("/train")
-def train(request: TrainRequest) -> dict[str, float]:
+def train(request: TrainRequest) -> dict:
     try:
         candles = load_candles_csv(request.csv_path)
         validate_candles(candles, min_rows=settings.MIN_CANDLES)
@@ -141,6 +144,44 @@ def run_backtest_cli(csv_path: str, output_csv: str | None = None) -> None:
         trades.to_csv(output_csv, index=False)
 
 
+def run_train_cli(csv_path: str, output_path: str = "models/best_model.joblib") -> dict:
+    candles = load_candles_csv(csv_path)
+    validate_candles(candles, min_rows=settings.MIN_CANDLES)
+    metrics = train_model(
+        candles,
+        output_path,
+        expiration_candles=settings.EXPIRATION_CANDLES,
+        payout=settings.PAYOUT,
+    )
+    print(pd.Series(metrics).to_string())
+    return metrics
+
+
+def run_paper_cli(csv_path: str) -> dict[str, str | float]:
+    candles = load_candles_csv(csv_path)
+    validate_candles(candles, min_rows=settings.MIN_CANDLES)
+
+    broker = PaperBroker(initial_balance=settings.INITIAL_BALANCE, candles=candles)
+    broker.connect()
+    recent_candles = broker.get_candles(settings.ASSET, settings.TIMEFRAME_SECONDS, len(candles))
+    featured = build_features(recent_candles)
+    if featured.empty:
+        raise ValueError("No usable feature rows for paper simulation.")
+
+    state = RiskState(balance=broker.get_balance(), starting_balance=broker.get_balance())
+    executor = Executor(
+        broker=broker,
+        strategy=RuleBasedStrategy(),
+        risk_manager=make_risk_manager(),
+        state=state,
+    )
+    result = executor.execute_latest(featured, settings.ASSET, expiration=settings.EXPIRATION_CANDLES)
+    result["balance"] = broker.get_balance()
+    result["mode"] = "paper"
+    print(pd.Series(result).to_string())
+    return result
+
+
 def run_compare_cli(csv_path: str, model_path: str) -> None:
     candles = load_candles_csv(csv_path)
     validate_candles(candles, min_rows=settings.MIN_CANDLES)
@@ -160,19 +201,18 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="BOT-YEDA trading bot")
-    parser.add_argument("command", choices=["backtest", "train", "compare"])
-    parser.add_argument("--csv", required=True, help="Path to candles CSV")
+    parser.add_argument("command", choices=["backtest", "train", "paper", "compare"])
+    parser.add_argument("--csv", default="data/raw/candles.csv", help="Path to candles CSV")
     parser.add_argument("--output", default=None, help="Output CSV for trades or model path")
-    parser.add_argument("--model", default="models/model.joblib", help="Model path for strategy comparison")
+    parser.add_argument("--model", default="models/best_model.joblib", help="Model path for strategy comparison")
     args = parser.parse_args()
 
     if args.command == "backtest":
         run_backtest_cli(args.csv, args.output)
     elif args.command == "train":
         output = args.output or "models/best_model.joblib"
-        candles = load_candles_csv(args.csv)
-        validate_candles(candles, min_rows=settings.MIN_CANDLES)
-        metrics = train_model(candles, output, expiration_candles=settings.EXPIRATION_CANDLES, payout=settings.PAYOUT)
-        print(pd.Series(metrics).to_string())
+        run_train_cli(args.csv, output)
+    elif args.command == "paper":
+        run_paper_cli(args.csv)
     else:
         run_compare_cli(args.csv, args.model)

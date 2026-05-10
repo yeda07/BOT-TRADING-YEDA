@@ -35,13 +35,19 @@ copy .env.example .env
 ## Backtest por CLI
 
 ```bash
-python -m app.main backtest --csv data/raw/candles.csv --output data/processed/trades.csv
+python -m app.main backtest
 ```
 
 ## Entrenar modelo ML
 
 ```bash
-python -m app.main train --csv data/raw/candles.csv --output models/best_model.joblib
+python -m app.main train
+```
+
+## Paper trading
+
+```bash
+python -m app.main paper
 ```
 
 ## Comparar reglas vs ML
