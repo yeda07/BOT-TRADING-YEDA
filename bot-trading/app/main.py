@@ -82,7 +82,11 @@ def train(request: TrainRequest) -> dict[str, float]:
     try:
         candles = load_candles_csv(request.csv_path)
         validate_candles(candles, min_rows=settings.MIN_CANDLES)
-        metrics = train_model(candles, output_path=request.output_path)
+        metrics = train_model(
+            candles,
+            output_path=request.output_path,
+            expiration_candles=settings.EXPIRATION_CANDLES,
+        )
         logger.info("ML model trained and stored at %s", request.output_path)
         return metrics
     except Exception as exc:
@@ -163,7 +167,7 @@ if __name__ == "__main__":
         output = args.output or "models/model.joblib"
         candles = load_candles_csv(args.csv)
         validate_candles(candles, min_rows=settings.MIN_CANDLES)
-        metrics = train_model(candles, output)
+        metrics = train_model(candles, output, expiration_candles=settings.EXPIRATION_CANDLES)
         print(pd.Series(metrics).to_string())
     else:
         run_compare_cli(args.csv, args.model)

@@ -20,8 +20,8 @@ class MLStrategy:
         X = pd.DataFrame([row[FEATURE_COLUMNS].to_dict()])
         prediction = int(self.model.predict(X)[0])
         confidence = self._confidence(X, prediction)
-        if confidence < self.min_confidence or prediction == 0:
-            return StrategySignal("HOLD", confidence, "Low model confidence or neutral prediction.")
+        if confidence < self.min_confidence:
+            return StrategySignal("HOLD", confidence, "Low model confidence.")
         return StrategySignal("BUY" if prediction == 1 else "SELL", confidence, "ML prediction.")
 
     def _confidence(self, X: pd.DataFrame, prediction: int) -> float:
@@ -30,4 +30,3 @@ class MLStrategy:
         classes = list(self.model.classes_)
         probabilities = self.model.predict_proba(X)[0]
         return float(probabilities[classes.index(prediction)])
-

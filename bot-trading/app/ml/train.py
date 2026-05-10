@@ -14,10 +14,11 @@ from app.ml.evaluate import evaluate_classifier
 def train_model(
     candles: pd.DataFrame,
     output_path: str | Path = "models/model.joblib",
+    expiration_candles: int = 1,
     test_size: float = 0.25,
     random_state: int = 42,
 ) -> dict[str, float]:
-    X, y = build_supervised_dataset(candles)
+    X, y = build_supervised_dataset(candles, expiration_candles=expiration_candles)
     if len(X) < 100:
         raise ValueError("At least 100 feature rows are recommended to train the ML model.")
 
@@ -37,4 +38,3 @@ def train_model(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, output_path)
     return metrics
-

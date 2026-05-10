@@ -18,6 +18,5 @@ def predict_latest(candles: pd.DataFrame, model_path: str | Path = "models/model
     if hasattr(model, "predict_proba"):
         classes = list(model.classes_)
         confidence = float(model.predict_proba(X)[0][classes.index(prediction)])
-    signal = "BUY" if prediction == 1 else "SELL" if prediction == -1 else "HOLD"
+    signal = "BUY" if prediction == 1 else "SELL"
     return {"signal": signal, "confidence": confidence}
-
