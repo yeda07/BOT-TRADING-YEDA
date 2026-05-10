@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+.env
+models/*.joblib
+data/raw/*.csv
+data/processed/*.csv
+data/logs/*.log
+data/logs/*.db
+notebooks/.ipynb_checkpoints/
+
