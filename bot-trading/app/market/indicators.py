@@ -15,17 +15,34 @@ def rsi(series: pd.Series, window: int = 14) -> pd.Series:
     gain = delta.clip(lower=0).rolling(window=window, min_periods=window).mean()
     loss = (-delta.clip(upper=0)).rolling(window=window, min_periods=window).mean()
     rs = gain / loss.replace(0, np.nan)
-    return 100 - (100 / (1 + rs))
+    values = 100 - (100 / (1 + rs))
+    values = values.mask((loss == 0) & (gain > 0), 100.0)
+    values = values.mask((loss == 0) & (gain == 0), 50.0)
+    return values
 
 
 def macd(series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
     macd_line = ema(series, fast) - ema(series, slow)
     signal_line = ema(macd_line, signal)
+    macd_diff = macd_line - signal_line
     return pd.DataFrame(
         {
             "macd": macd_line,
             "macd_signal": signal_line,
-            "macd_hist": macd_line - signal_line,
+            "macd_diff": macd_diff,
+            "macd_hist": macd_diff,
+        }
+    )
+
+
+def bollinger_bands(series: pd.Series, window: int = 20, std_multiplier: float = 2.0) -> pd.DataFrame:
+    mid = series.rolling(window=window, min_periods=window).mean()
+    std = series.rolling(window=window, min_periods=window).std()
+    return pd.DataFrame(
+        {
+            "bollinger_high": mid + std * std_multiplier,
+            "bollinger_mid": mid,
+            "bollinger_low": mid - std * std_multiplier,
         }
     )
 
@@ -54,12 +71,18 @@ def adx(df: pd.DataFrame, window: int = 14) -> pd.Series:
 
 def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     enriched = df.copy()
+    enriched["ema_9"] = ema(enriched["close"], 9)
+    enriched["ema_21"] = ema(enriched["close"], 21)
     enriched["sma_fast"] = sma(enriched["close"], 10)
     enriched["sma_slow"] = sma(enriched["close"], 30)
-    enriched["ema_fast"] = ema(enriched["close"], 12)
-    enriched["ema_slow"] = ema(enriched["close"], 26)
+    enriched["ema_fast"] = enriched["ema_9"]
+    enriched["ema_slow"] = enriched["ema_21"]
     enriched["rsi"] = rsi(enriched["close"], 14)
     enriched["atr"] = atr(enriched, 14)
     enriched["adx"] = adx(enriched, 14)
-    return pd.concat([enriched, macd(enriched["close"])], axis=1)
-
+    enriched["candle_body"] = (enriched["close"] - enriched["open"]).abs()
+    enriched["candle_range"] = enriched["high"] - enriched["low"]
+    enriched["return"] = enriched["close"].pct_change()
+    enriched["direction"] = np.where(enriched["close"] > enriched["open"], 1, np.where(enriched["close"] < enriched["open"], -1, 0))
+    enriched = pd.concat([enriched, macd(enriched["close"]), bollinger_bands(enriched["close"])], axis=1)
+    return enriched.dropna().reset_index(drop=True)

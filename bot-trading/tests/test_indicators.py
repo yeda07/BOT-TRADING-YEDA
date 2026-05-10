@@ -26,8 +26,30 @@ def test_rsi_bounds():
 
 def test_add_indicators_columns():
     result = add_indicators(sample_candles())
-    for column in ["sma_fast", "sma_slow", "rsi", "macd", "atr", "adx"]:
+    expected_columns = [
+        "ema_9",
+        "ema_21",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "macd_diff",
+        "bollinger_high",
+        "bollinger_mid",
+        "bollinger_low",
+        "atr",
+        "candle_body",
+        "candle_range",
+        "return",
+        "direction",
+    ]
+    for column in expected_columns:
         assert column in result.columns
+
+
+def test_add_indicators_returns_clean_dataframe_without_nan():
+    result = add_indicators(sample_candles(220))
+    assert not result.empty
+    assert not result.isna().any().any()
 
 
 def test_candles_require_volume_column():
