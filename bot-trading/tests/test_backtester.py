@@ -53,3 +53,39 @@ def test_backtester_logs_each_executed_trade():
     metrics, trades = tester.run(candles)
     assert metrics.trades == len(trades)
     assert logger.info.call_count == len(trades)
+
+
+def test_backtester_simulates_binary_options_and_saves_outputs(tmp_path):
+    candles = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=240, freq="min", tz="UTC"),
+            "open": [100 + i for i in range(240)],
+            "high": [101 + i for i in range(240)],
+            "low": [99 + i for i in range(240)],
+            "close": [100.5 + i for i in range(240)],
+            "volume": [100] * 240,
+        }
+    )
+    tester = Backtester(
+        AlwaysBuyStrategy(),
+        RiskManager(min_model_confidence=0.0, min_candles=1),
+        initial_balance=1000,
+        payout=0.8,
+        stake=10,
+        expiration_candles=2,
+        output_dir=tmp_path,
+    )
+
+    metrics, trades = tester.run(candles)
+
+    assert metrics.initial_balance == 1000
+    assert metrics.total_trades == len(trades)
+    assert metrics.wins == len(trades)
+    assert metrics.losses == 0
+    assert metrics.win_rate == 1.0
+    assert metrics.net_profit == len(trades) * 8
+    assert metrics.final_balance == 1000 + metrics.net_profit
+    assert metrics.max_consecutive_losses == 0
+    assert len(metrics.equity_curve) == len(trades) + 1
+    assert (tmp_path / "backtest_results.csv").exists()
+    assert (tmp_path / "equity_curve.csv").exists()

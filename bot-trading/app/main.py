@@ -27,7 +27,7 @@ class BacktestRequest(BaseModel):
 
 class TrainRequest(BaseModel):
     csv_path: str
-    output_path: str = "models/model.joblib"
+    output_path: str = "models/best_model.joblib"
 
 
 class CompareRequest(BaseModel):
@@ -65,6 +65,7 @@ def backtest(request: BacktestRequest) -> dict:
             risk_manager=make_risk_manager(),
             initial_balance=request.initial_balance or settings.INITIAL_BALANCE,
             payout=settings.PAYOUT,
+            expiration_candles=settings.EXPIRATION_CANDLES,
             logger=logger,
             strategy_name="rule_based",
         )
@@ -86,6 +87,7 @@ def train(request: TrainRequest) -> dict[str, float]:
             candles,
             output_path=request.output_path,
             expiration_candles=settings.EXPIRATION_CANDLES,
+            payout=settings.PAYOUT,
         )
         logger.info("ML model trained and stored at %s", request.output_path)
         return metrics
@@ -105,6 +107,7 @@ def compare_strategies(request: CompareRequest) -> dict:
             risk_manager_factory=make_risk_manager,
             initial_balance=request.initial_balance or settings.INITIAL_BALANCE,
             payout=settings.PAYOUT,
+            expiration_candles=settings.EXPIRATION_CANDLES,
             logger=logger,
         )
         saved = save_trades(trades) if request.save_to_db else 0
@@ -127,6 +130,7 @@ def run_backtest_cli(csv_path: str, output_csv: str | None = None) -> None:
         make_risk_manager(),
         settings.INITIAL_BALANCE,
         payout=settings.PAYOUT,
+        expiration_candles=settings.EXPIRATION_CANDLES,
         logger=logger,
         strategy_name="rule_based",
     )
@@ -146,6 +150,7 @@ def run_compare_cli(csv_path: str, model_path: str) -> None:
         risk_manager_factory=make_risk_manager,
         initial_balance=settings.INITIAL_BALANCE,
         payout=settings.PAYOUT,
+        expiration_candles=settings.EXPIRATION_CANDLES,
         logger=logger,
     )
     print(pd.Series(comparison.to_dict()).to_string())
@@ -164,10 +169,10 @@ if __name__ == "__main__":
     if args.command == "backtest":
         run_backtest_cli(args.csv, args.output)
     elif args.command == "train":
-        output = args.output or "models/model.joblib"
+        output = args.output or "models/best_model.joblib"
         candles = load_candles_csv(args.csv)
         validate_candles(candles, min_rows=settings.MIN_CANDLES)
-        metrics = train_model(candles, output, expiration_candles=settings.EXPIRATION_CANDLES)
+        metrics = train_model(candles, output, expiration_candles=settings.EXPIRATION_CANDLES, payout=settings.PAYOUT)
         print(pd.Series(metrics).to_string())
     else:
         run_compare_cli(args.csv, args.model)

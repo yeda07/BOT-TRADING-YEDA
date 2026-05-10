@@ -41,7 +41,7 @@ python -m app.main backtest --csv data/raw/candles.csv --output data/processed/t
 ## Entrenar modelo ML
 
 ```bash
-python -m app.main train --csv data/raw/candles.csv --output models/model.joblib
+python -m app.main train --csv data/raw/candles.csv --output models/best_model.joblib
 ```
 
 ## Comparar reglas vs ML

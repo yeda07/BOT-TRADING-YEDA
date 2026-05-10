@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS trades (
     confidence REAL NOT NULL,
     entry REAL NOT NULL,
     exit REAL NOT NULL,
+    won INTEGER NOT NULL DEFAULT 0,
     stake REAL NOT NULL,
     pnl REAL NOT NULL,
     balance REAL NOT NULL,
@@ -29,6 +30,8 @@ def connect_sqlite(path: str | Path = "data/logs/trades.db") -> sqlite3.Connecti
     columns = {row[1] for row in conn.execute("PRAGMA table_info(trades)")}
     if "strategy" not in columns:
         conn.execute("ALTER TABLE trades ADD COLUMN strategy TEXT NOT NULL DEFAULT ''")
+    if "won" not in columns:
+        conn.execute("ALTER TABLE trades ADD COLUMN won INTEGER NOT NULL DEFAULT 0")
     conn.commit()
     return conn
 

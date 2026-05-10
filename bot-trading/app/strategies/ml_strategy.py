@@ -11,13 +11,15 @@ class MLStrategy:
     def __init__(self, model_path: str | Path, min_confidence: float = 0.60) -> None:
         self.model_path = Path(model_path)
         self.min_confidence = min_confidence
-        self.model = joblib.load(self.model_path)
+        artifact = joblib.load(self.model_path)
+        self.model = artifact["model"] if isinstance(artifact, dict) and "model" in artifact else artifact
+        self.features = artifact.get("features", FEATURE_COLUMNS) if isinstance(artifact, dict) else FEATURE_COLUMNS
 
     def generate_signal(self, row: pd.Series) -> StrategySignal:
-        if row[FEATURE_COLUMNS].isna().any():
+        if row[self.features].isna().any():
             return StrategySignal("HOLD", 0.0, "Insufficient ML features.")
 
-        X = pd.DataFrame([row[FEATURE_COLUMNS].to_dict()])
+        X = pd.DataFrame([row[self.features].to_dict()])
         prediction = int(self.model.predict(X)[0])
         confidence = self._confidence(X, prediction)
         if confidence < self.min_confidence:

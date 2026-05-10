@@ -33,6 +33,7 @@ def compare_rule_vs_ml(
     risk_manager_factory: Callable[[], RiskManager],
     initial_balance: float = 1000.0,
     payout: float = 0.80,
+    expiration_candles: int = 1,
     logger: Logger | None = None,
     winner_metric: str = "net_profit",
 ) -> tuple[StrategyComparison, pd.DataFrame]:
@@ -41,6 +42,7 @@ def compare_rule_vs_ml(
         risk_manager=risk_manager_factory(),
         initial_balance=initial_balance,
         payout=payout,
+        expiration_candles=expiration_candles,
         logger=logger,
         strategy_name="rule_based",
     ).run(candles)
@@ -50,6 +52,7 @@ def compare_rule_vs_ml(
         risk_manager=risk_manager_factory(),
         initial_balance=initial_balance,
         payout=payout,
+        expiration_candles=expiration_candles,
         logger=logger,
         strategy_name="ml",
     ).run(candles)
