@@ -1,6 +1,8 @@
 import pandas as pd
+from datetime import datetime, timezone
+from uuid import uuid4
 
-from app.brokers.base import BrokerBase, OrderResult, accepted_order, rejected_order
+from app.brokers.base import BrokerBase, OrderResult, rejected_order
 
 
 class PaperBroker(BrokerBase):
@@ -12,6 +14,9 @@ class PaperBroker(BrokerBase):
 
     def connect(self) -> None:
         self.connected = True
+
+    def disconnect(self) -> None:
+        self.connected = False
 
     def get_balance(self) -> float:
         return self.balance
@@ -35,9 +40,47 @@ class PaperBroker(BrokerBase):
         if amount > self.balance:
             return rejected_order(asset, amount, direction, expiration, "Insufficient paper balance.")
 
-        result = accepted_order(asset, amount, direction, expiration, "Paper order accepted.")
+        now = datetime.now(timezone.utc)
+        result = OrderResult(
+            status="accepted",
+            asset=asset,
+            amount=amount,
+            direction=direction,
+            expiration=expiration,
+            message="Paper order accepted.",
+            timestamp=now,
+            order_id=str(uuid4()),
+            entry_time=now,
+            profit=0.0,
+        )
         self.orders.append(result)
         return result
+
+    def resolve_order(self, order_id: str, entry_price: float, exit_price: float, payout: float) -> dict:
+        order = next((item for item in self.orders if item.order_id == order_id), None)
+        if order is None:
+            raise ValueError(f"Order not found: {order_id}")
+        if payout <= 0:
+            raise ValueError("payout must be positive.")
+
+        won = (order.direction == "BUY" and exit_price > entry_price) or (
+            order.direction == "SELL" and exit_price < entry_price
+        )
+        profit = order.amount * payout if won else -order.amount
+        self.balance += profit
+        return {
+            "order_id": order.order_id,
+            "asset": order.asset,
+            "amount": order.amount,
+            "direction": order.direction,
+            "expiration": order.expiration,
+            "entry_time": order.entry_time,
+            "status": "WON" if won else "LOST",
+            "profit": profit,
+            "balance": self.balance,
+            "entry_price": float(entry_price),
+            "exit_price": float(exit_price),
+        }
 
     def apply_pnl(self, pnl: float) -> None:
         self.balance += pnl

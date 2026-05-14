@@ -1,0 +1,5 @@
+model,accuracy,precision,recall,f1,roc_auc,total_samples
+LogisticRegression,1.0,1.0,1.0,1.0,1.0,33
+RandomForestClassifier,1.0,1.0,1.0,1.0,1.0,33
+GradientBoostingClassifier,1.0,1.0,1.0,1.0,1.0,33
+ExtraTreesClassifier,1.0,1.0,1.0,1.0,1.0,33

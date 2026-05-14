@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BotMode = Literal["backtest", "paper", "demo", "real"]
 BrokerName = Literal["paper", "iqoption", "exnova"]
+DataFeedSource = Literal["csv", "mock_realtime", "iqoption_demo", "exnova_demo"]
 
 
 class Settings(BaseSettings):
@@ -42,6 +43,13 @@ class Settings(BaseSettings):
     LOG_DIR: Path = Path("data/logs")
     MODEL_DIR: Path = Path("models")
     DATABASE_URL: str = "sqlite:///data/logs/trades.db"
+    DATA_FEED_SOURCE: DataFeedSource = "mock_realtime"
+    CANDLES_CSV_PATH: str = "data/raw/candles.csv"
+    COLLECTED_CANDLES_PATH: str = "data/raw/collected_candles.csv"
+    LIVE_MAX_STEPS: int | None = Field(default=100, ge=1)
+    LIVE_SLEEP_SECONDS: float = Field(default=1.0, ge=0.0)
+    TRADE_LOG_PATH: str = "data/logs/live_trades.csv"
+    TRADES_DB_PATH: str = "data/logs/trades.db"
 
     IQOPTION_EMAIL: str | None = None
     IQOPTION_PASSWORD: str | None = None

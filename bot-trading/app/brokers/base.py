@@ -19,12 +19,18 @@ class OrderResult:
     expiration: int
     message: str = ""
     timestamp: datetime | None = None
+    order_id: str | None = None
+    entry_time: datetime | None = None
+    profit: float = 0.0
 
 
 class BrokerBase(ABC):
     @abstractmethod
     def connect(self):
         raise NotImplementedError
+
+    def disconnect(self):
+        return None
 
     @abstractmethod
     def get_balance(self):

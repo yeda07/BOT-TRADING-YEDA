@@ -1,8 +1,10 @@
 import joblib
 import pandas as pd
+import pytest
 
 from app.market.features import FEATURE_COLUMNS
-from app.ml.predict import predict_latest
+from app.ml.predict import MLPredictor, predict_latest
+from app.market.features import build_features
 
 
 class ProbModel:
@@ -51,3 +53,16 @@ def test_predict_latest_returns_sell_when_probability_up_is_low(tmp_path):
 def test_predict_latest_returns_hold_between_thresholds(tmp_path):
     result = predict_latest(sample_candles(), save_model(tmp_path, 0.50), min_confidence=0.58)
     assert result == {"signal": "HOLD", "confidence": 0.50, "probability_up": 0.50}
+
+
+def test_ml_predictor_predicts_dataframe(tmp_path):
+    predictor = MLPredictor(save_model(tmp_path, 0.70))
+    predictions = predictor.predict_dataframe(build_features(sample_candles()))
+
+    assert set(predictions["signal"].unique()) == {"BUY"}
+    assert "probability_up" in predictions.columns
+
+
+def test_ml_predictor_missing_model_has_controlled_error(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Run `python -m app.main train` first"):
+        MLPredictor(tmp_path / "missing.joblib")

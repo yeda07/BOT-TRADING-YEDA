@@ -59,6 +59,30 @@ def test_paper_broker_rejects_invalid_order():
     assert result.status == "rejected"
 
 
+def test_paper_broker_resolves_buy_winner():
+    broker = PaperBroker(initial_balance=1000)
+    broker.connect()
+    order = broker.place_order("EURUSD-OTC", 10, "BUY", 1)
+
+    result = broker.resolve_order(order.order_id, entry_price=100, exit_price=101, payout=0.87)
+
+    assert result["status"] == "WON"
+    assert result["profit"] == 8.7
+    assert broker.get_balance() == 1008.7
+
+
+def test_paper_broker_resolves_sell_winner():
+    broker = PaperBroker(initial_balance=1000)
+    broker.connect()
+    order = broker.place_order("EURUSD-OTC", 10, "SELL", 1)
+
+    result = broker.resolve_order(order.order_id, entry_price=100, exit_price=99, payout=0.87)
+
+    assert result["status"] == "WON"
+    assert result["profit"] == 8.7
+    assert broker.get_balance() == 1008.7
+
+
 def test_real_broker_adapters_do_not_execute_orders():
     iqoption = IQOptionBroker()
     exnova = ExnovaBroker()
@@ -68,7 +92,7 @@ def test_real_broker_adapters_do_not_execute_orders():
 
     assert iq_result.status == "rejected"
     assert exnova_result.status == "rejected"
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError, match="requires credentials"):
         iqoption.connect()
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(RuntimeError, match="requires credentials"):
         exnova.connect()

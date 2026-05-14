@@ -8,14 +8,28 @@ class ExnovaBroker(BrokerBase):
     terms-of-service workarounds are intentionally not implemented.
     """
 
+    def __init__(self, email: str | None = None, password: str | None = None) -> None:
+        self.email = email
+        self.password = password
+        self.connected = False
+
+    @staticmethod
+    def adapter_not_implemented_message() -> str:
+        return "Data feed source selected but adapter is not fully implemented yet."
+
     def connect(self) -> None:
-        raise NotImplementedError("Exnova adapter is prepared but disabled. Use PaperBroker first.")
+        if not self.email or not self.password:
+            raise RuntimeError("Exnova demo data feed requires credentials in .env.")
+        raise NotImplementedError(self.adapter_not_implemented_message())
+
+    def disconnect(self) -> None:
+        self.connected = False
 
     def get_balance(self) -> float:
         raise NotImplementedError("Exnova adapter is prepared but disabled.")
 
-    def get_candles(self, asset: str, timeframe: int, count: int):
-        raise NotImplementedError("Exnova candle retrieval is disabled until a compliant demo API is configured.")
+    def get_candles(self, asset: str, timeframe_seconds: int, count: int):
+        raise NotImplementedError(self.adapter_not_implemented_message())
 
     def place_order(self, asset: str, amount: float, direction: str, expiration: int) -> OrderResult:
-        return rejected_order(asset, amount, direction, expiration, "Exnova real/demo execution is disabled.")
+        return rejected_order(asset, amount, direction, expiration, "Real broker execution is not enabled.")

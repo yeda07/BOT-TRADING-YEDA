@@ -1,6 +1,9 @@
 __pycache__/
 *.py[cod]
+*.pyc
 .pytest_cache/
+.tmp_pytest/
+.tmp_pytest_*/
 .mypy_cache/
 .ruff_cache/
 .venv/
@@ -12,4 +15,3 @@ data/processed/*.csv
 data/logs/*.log
 data/logs/*.db
 notebooks/.ipynb_checkpoints/
-

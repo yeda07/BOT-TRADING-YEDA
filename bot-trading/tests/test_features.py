@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from app.market.features import FEATURE_COLUMNS, build_features, build_supervised_dataset
+from app.market.features import FEATURE_COLUMNS, build_features, build_supervised_dataset, create_features
 
 
 def sample_candles(rows: int = 240) -> pd.DataFrame:
@@ -24,6 +24,15 @@ def test_build_features_creates_ml_columns_without_nan():
     for column in FEATURE_COLUMNS:
         assert column in features.columns
     assert not features[FEATURE_COLUMNS].isna().any().any()
+
+
+def test_create_features_returns_X_y_and_feature_names():
+    X, y, features = create_features(sample_candles(), expiration_candles=2)
+
+    assert list(X.columns) == features == FEATURE_COLUMNS
+    assert len(X) == len(y)
+    assert not y.isna().any()
+    assert {"ema_ratio", "bb_width", "upper_wick", "lower_wick", "return_10", "momentum_5"} <= set(features)
 
 
 def test_build_supervised_dataset_uses_binary_target_and_expiration():

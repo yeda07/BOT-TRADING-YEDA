@@ -1,6 +1,15 @@
+import app.main as main_module
 import pandas as pd
+import pytest
 
-from app.main import run_paper_cli
+from app.main import (
+    require_cli_csv,
+    run_collect_data_cli,
+    run_data_quality_cli,
+    run_live_paper_cli,
+    run_paper_cli,
+    run_predict_latest_cli,
+)
 
 
 def test_run_paper_cli_uses_csv_and_paper_broker(tmp_path):
@@ -24,3 +33,93 @@ def test_run_paper_cli_uses_csv_and_paper_broker(tmp_path):
     assert result["mode"] == "paper"
     assert result["status"] in {"accepted", "blocked", "rejected"}
     assert result["balance"] > 0
+
+
+def test_require_cli_csv_reports_expected_format(tmp_path):
+    with pytest.raises(FileNotFoundError, match="timestamp,open,high,low,close,volume"):
+        require_cli_csv(str(tmp_path / "missing.csv"))
+
+
+def test_predict_latest_cli_missing_model_shows_controlled_error(tmp_path):
+    csv_path = tmp_path / "candles.csv"
+    sample_rows = 240
+    prices = [100 + index * 0.1 for index in range(sample_rows)]
+    pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=sample_rows, freq="min", tz="UTC"),
+            "open": prices,
+            "high": [price + 0.2 for price in prices],
+            "low": [price - 0.2 for price in prices],
+            "close": [price + 0.05 for price in prices],
+            "volume": [100] * sample_rows,
+        }
+    ).to_csv(csv_path, index=False)
+
+    with pytest.raises(FileNotFoundError, match="Run `python -m app.main train` first"):
+        run_predict_latest_cli(str(csv_path), str(tmp_path / "missing.joblib"))
+
+
+def test_live_paper_cli_missing_model_shows_controlled_error(tmp_path):
+    with pytest.raises(FileNotFoundError, match="Run `python -m app.main train` first"):
+        run_live_paper_cli(str(tmp_path / "candles.csv"), str(tmp_path / "missing.joblib"))
+
+
+def test_live_paper_cli_missing_candles_shows_controlled_error(tmp_path):
+    model_path = tmp_path / "best_model.joblib"
+    model_path.write_bytes(b"placeholder")
+
+    with pytest.raises(FileNotFoundError, match="Expected data/raw/candles.csv"):
+        run_live_paper_cli(str(tmp_path / "missing.csv"), str(model_path))
+
+
+def test_collect_data_cli_generates_collected_candles(tmp_path, monkeypatch):
+    csv_path = tmp_path / "candles.csv"
+    pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=5, freq="min", tz="UTC"),
+            "open": [100, 101, 102, 103, 104],
+            "high": [101, 102, 103, 104, 105],
+            "low": [99, 100, 101, 102, 103],
+            "close": [100, 101, 102, 103, 104],
+            "volume": [100] * 5,
+        }
+    ).to_csv(csv_path, index=False)
+    collected_path = tmp_path / "collected.csv"
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        main_module.settings.model_copy(
+            update={
+                "DATA_FEED_SOURCE": "mock_realtime",
+                "CANDLES_CSV_PATH": str(csv_path),
+                "COLLECTED_CANDLES_PATH": str(collected_path),
+                "LIVE_MAX_STEPS": 3,
+            }
+        ),
+    )
+
+    result = run_collect_data_cli(str(csv_path))
+
+    assert result == str(collected_path)
+    assert len(pd.read_csv(collected_path)) == 3
+
+
+def test_data_quality_cli_prints_report(tmp_path, capsys):
+    csv_path = tmp_path / "candles.csv"
+    pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=2, freq="min", tz="UTC"),
+            "open": [100, 101],
+            "high": [101, 102],
+            "low": [99, 100],
+            "close": [100, 101],
+            "volume": [100] * 2,
+            "asset": ["EURUSD-OTC"] * 2,
+            "timeframe_seconds": [60] * 2,
+            "source": ["test"] * 2,
+        }
+    ).to_csv(csv_path, index=False)
+
+    run_data_quality_cli(str(csv_path))
+
+    assert "DATA QUALITY REPORT" in capsys.readouterr().out

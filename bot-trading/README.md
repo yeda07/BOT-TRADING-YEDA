@@ -18,7 +18,6 @@ Desde la raíz del repositorio:
 cd bot-trading
 python -m venv .venv
 .venv\Scripts\activate
-cd bot-trading
 pip install -r requirements.txt
 copy .env.example .env
 ```
@@ -26,7 +25,7 @@ copy .env.example .env
 Para verificar la instalación:
 
 ```bash
-python -m pytest -p no:cacheprovider --basetemp=.tmp_pytest -q
+pytest
 ```
 
 ## Configuración
@@ -48,6 +47,10 @@ MAX_DAILY_LOSS=0.05
 MAX_CONSECUTIVE_LOSSES=3
 MIN_CONFIDENCE=0.58
 ENABLE_REAL_TRADING=false
+LIVE_MAX_STEPS=100
+LIVE_SLEEP_SECONDS=1
+TRADE_LOG_PATH=data/logs/live_trades.csv
+TRADES_DB_PATH=data/logs/trades.db
 ```
 
 Reglas de seguridad:
@@ -66,6 +69,8 @@ El archivo base esperado es:
 ```text
 data/raw/candles.csv
 ```
+
+Si ejecutas `python -m app.main backtest` o `python -m app.main train` y ese archivo no existe o no tiene velas suficientes, el CLI crea un dataset demo determinístico para que la primera ejecución sea funcional. Para usar tus propios datos, pasa la ruta con `--csv`.
 
 Debe incluir estas columnas:
 
@@ -161,6 +166,85 @@ models/best_model.joblib
 
 El artefacto guardado incluye el modelo, la lista de features, el nombre del mejor modelo y sus métricas.
 
+## Machine Learning
+
+La fase de Machine Learning entrena modelos para estimar si la vela futura cerrará arriba o abajo según `EXPIRATION_CANDLES`. El flujo usa split temporal, sin `shuffle`, para reducir data leakage:
+
+- 70% de datos antiguos para entrenamiento.
+- 15% para validación y selección del modelo.
+- 15% de datos recientes para prueba.
+
+Modelos comparados:
+
+- `LogisticRegression`
+- `RandomForestClassifier`
+- `GradientBoostingClassifier`
+- `ExtraTreesClassifier`
+
+Comandos principales:
+
+```bash
+pip install -r requirements.txt
+python -m app.main train
+python -m app.main compare
+python -m app.main live-paper
+python -m app.main summary
+python -m app.main predict-latest
+pytest
+```
+
+El entrenamiento guarda:
+
+```text
+models/best_model.joblib
+data/logs/model_metrics.csv
+```
+
+La comparación de estrategias guarda:
+
+```text
+data/logs/ml_backtest_results.csv
+data/logs/ml_equity_curve.csv
+data/logs/strategy_comparison.csv
+```
+
+Interpretación de métricas:
+
+- `AUC`: mide qué tan bien el modelo separa velas alcistas y bajistas en distintos umbrales.
+- `F1`: balancea precision y recall; ayuda cuando accuracy puede ser engañoso.
+- `win rate`: porcentaje de operaciones ganadas en la simulación binaria.
+- `profit factor`: ganancia bruta dividida por pérdida bruta. Valores mayores a `1` son preferibles.
+- `max drawdown`: caída máxima desde un pico de equity; mide riesgo y estabilidad.
+
+El `breakeven win rate` es el porcentaje mínimo de aciertos requerido para no perder dinero según el payout:
+
+```text
+breakeven = 1 / (1 + payout)
+```
+
+Con `PAYOUT=0.87`, el modelo necesita superar aproximadamente `53.48%` de win rate antes de costos, slippage o latencia.
+
+Un modelo con buen accuracy puede perder dinero si no supera el win rate mínimo requerido por el payout del broker. Por eso el mejor modelo no se elige solo por accuracy; se priorizan `roc_auc`, `f1`, win rate simulado sobre breakeven, `profit_factor` mayor a `1` y drawdown razonable.
+
+`predict-latest` carga el mejor modelo y genera una señal para la última vela disponible:
+
+```bash
+python -m app.main predict-latest
+```
+
+Ejemplo:
+
+```text
+===== LATEST SIGNAL =====
+Asset: EURUSD-OTC
+Signal: BUY
+Confidence: 0.61
+Probability Up: 0.61
+Decision: Trade allowed only in paper/demo mode
+```
+
+Las señales ML deben usarse primero en backtesting y paper/demo. Este proyecto no habilita operación real, no automatiza clicks de navegador y no guarda credenciales en código.
+
 ## Como Ejecutar Paper Trading
 
 Simula una operación usando las últimas velas del CSV:
@@ -176,6 +260,110 @@ python -m app.main paper --csv data/raw/candles.csv
 ```
 
 Este modo usa `PaperBroker`. No envía órdenes reales, no automatiza navegador y no interactúa con cuentas reales.
+
+## Live Paper Trading
+
+`live-paper` ejecuta el bot como si estuviera en vivo, pero usando velas de `data/raw/candles.csv`, `PaperBroker`, el modelo ML guardado y el `RiskManager`. El feed simula la llegada de velas una por una y el motor evita mirar datos futuros.
+
+Flujo:
+
+- Carga una ventana reciente de velas.
+- Calcula indicadores y features.
+- Predice con `models/best_model.joblib`.
+- Valida confianza, riesgo y vela duplicada.
+- Abre una orden binaria paper.
+- Espera la vela de expiracion dentro del CSV.
+- Resuelve `WON`, `LOST` o `PENDING`.
+- Registra la operacion en CSV y SQLite.
+
+Comandos:
+
+```bash
+python -m app.main train
+python -m app.main compare
+python -m app.main live-paper
+python -m app.main summary
+python -m app.main collect-data
+python -m app.main data-quality
+pytest
+```
+
+Con rutas explicitas:
+
+```bash
+python -m app.main live-paper --csv data/raw/candles.csv --model models/best_model.joblib
+```
+
+Archivos generados:
+
+```text
+data/logs/live_trades.csv
+data/logs/trades.db
+```
+
+Resumen:
+
+```bash
+python -m app.main summary
+```
+
+Dashboard opcional:
+
+```bash
+streamlit run app/dashboard/streamlit_app.py
+```
+
+Aunque el bot gane en backtest o paper trading, eso no garantiza ganancias en cuenta real. La ejecucion real puede tener latencia, diferencias de precio, restricciones del broker y riesgo de perdida total. El modo `real` sigue bloqueado por defecto y esta fase no implementa operacion con dinero real.
+
+## Real-Time Data Feed / Demo Data Connection
+
+La fuente de velas se selecciona con `DATA_FEED_SOURCE` en `.env`. Todas las fuentes se normalizan al formato interno:
+
+```text
+timestamp,open,high,low,close,volume,asset,timeframe_seconds,source
+```
+
+Fuentes disponibles:
+
+- `csv`: lee `CANDLES_CSV_PATH` y entrega velas desde archivo.
+- `mock_realtime`: usa un CSV historico, pero entrega las velas una a una como si fueran tiempo real.
+- `iqoption_demo`: adaptador preparado para una API demo autorizada; todavia no descarga velas.
+- `exnova_demo`: adaptador preparado para una API demo autorizada; todavia no descarga velas.
+
+Ejemplo de `.env`:
+
+```env
+BOT_MODE=paper
+DATA_FEED_SOURCE=mock_realtime
+CANDLES_CSV_PATH=data/raw/candles.csv
+COLLECTED_CANDLES_PATH=data/raw/collected_candles.csv
+ASSET=EURUSD-OTC
+TIMEFRAME_SECONDS=60
+LIVE_MAX_STEPS=100
+ENABLE_REAL_TRADING=false
+```
+
+Recolectar velas:
+
+```bash
+python -m app.main collect-data
+```
+
+Validar calidad:
+
+```bash
+python -m app.main data-quality
+```
+
+Correr live paper con la fuente configurada:
+
+```bash
+python -m app.main live-paper
+python -m app.main summary
+pytest
+```
+
+La conexion a brokers reales debe hacerse unicamente mediante APIs, websockets o metodos permitidos por el proveedor. El proyecto no usa automatizacion de pantalla, no automatiza clicks, no hace scraping agresivo, no intenta saltarse restricciones del broker y no activa trading real. Las credenciales futuras deben vivir en `.env` y no se imprimen en logs.
 
 ## Comparar Reglas vs ML
 
@@ -223,8 +411,12 @@ app/
     backtester.py        Motor de backtesting de opciones binarias
     executor.py          Ejecución paper/demo sobre BrokerBase
     comparison.py        Comparación reglas vs ML
+    live_engine.py       Motor live controlado para paper/demo
+    order_manager.py     Validacion y envio de ordenes paper
+    trade_logger.py      Registro CSV de operaciones live
   market/
     candles.py           Carga y validación de CSV
+    data_feed.py         Feed CSV vela por vela sin mirar futuro
     indicators.py        Indicadores técnicos
     features.py          Features y target para ML
   ml/
@@ -238,6 +430,9 @@ app/
     ml_strategy.py       Estrategia basada en modelo ML
   storage/
     database.py          Persistencia SQLite de trades
+    trades_repository.py Repositorio SQLite para live trading
+  dashboard/
+    streamlit_app.py     Dashboard opcional de operaciones paper
   utils/
     logger.py            Configuración de logs
 ```
@@ -251,6 +446,7 @@ Flujo principal:
 5. `execution/backtester.py` simula resultados y calcula métricas.
 6. `ml/train.py` entrena modelos y guarda el mejor artefacto.
 7. `brokers/paper_broker.py` permite simular ejecución sin operar dinero real.
+8. `execution/live_engine.py` ejecuta paper trading controlado con logs y persistencia.
 
 ## Brokers
 
