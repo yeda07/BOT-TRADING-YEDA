@@ -1,0 +1,11 @@
+{
+  "threshold": 0.52,
+  "total_trades": 140.0,
+  "win_rate": 1.0,
+  "breakeven_win_rate": 0.53475935828877,
+  "edge": 0.46524064171123003,
+  "net_profit": 121.80000000000001,
+  "profit_factor": Infinity,
+  "max_drawdown": 0.0,
+  "average_profit_per_trade": 0.8700000000000001
+}

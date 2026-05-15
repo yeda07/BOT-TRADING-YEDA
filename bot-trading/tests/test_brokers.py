@@ -96,3 +96,10 @@ def test_real_broker_adapters_do_not_execute_orders():
         iqoption.connect()
     with pytest.raises(RuntimeError, match="requires credentials"):
         exnova.connect()
+
+
+def test_real_broker_demo_execution_not_implemented():
+    with pytest.raises(NotImplementedError, match="Authorized demo execution"):
+        IQOptionBroker().place_demo_order("EURUSD-OTC", 10, "BUY", 60)
+    with pytest.raises(NotImplementedError, match="Authorized demo execution"):
+        ExnovaBroker().place_demo_order("EURUSD-OTC", 10, "BUY", 60)

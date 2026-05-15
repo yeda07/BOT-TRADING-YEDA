@@ -1,14 +1,27 @@
 services:
-  bot-trading:
-    image: python:3.12-slim
-    working_dir: /app
-    volumes:
-      - .:/app
+  bot:
+    build: .
     env_file:
       - .env
-    command: >
-      sh -c "pip install --no-cache-dir -r requirements.txt &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000"
-    ports:
-      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: ["python", "-m", "app.main", "healthcheck"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "app.main", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  dashboard:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    command: ["streamlit", "run", "app/dashboard/streamlit_app.py", "--server.address=0.0.0.0"]
+    ports:
+      - "8501:8501"
+    depends_on:
+      - bot

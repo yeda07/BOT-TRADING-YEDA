@@ -1,0 +1,2 @@
+timestamp,asset,signal,confidence,amount,entry_price,exit_price,result,profit,balance,reason,mode
+t,EURUSD-OTC,BUY,0.9,10.0,100.0,,WON,8.7,1008.7,Demo execution,demo

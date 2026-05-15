@@ -1,0 +1,10 @@
+{
+  "average_win_rate": 1.0,
+  "std_win_rate": 0.0,
+  "average_profit_factor": 3.0,
+  "average_drawdown": 0.0,
+  "profitable_folds": 2,
+  "total_folds": 2,
+  "profitable_folds_ratio": 1.0,
+  "stability_score": 1.0
+}

@@ -6,9 +6,13 @@ from app.main import (
     require_cli_csv,
     run_collect_data_cli,
     run_data_quality_cli,
+    run_demo_cli,
+    run_models_cli,
+    run_retrain_cli,
     run_live_paper_cli,
     run_paper_cli,
     run_predict_latest_cli,
+    run_validate_cli,
 )
 
 
@@ -123,3 +127,76 @@ def test_data_quality_cli_prints_report(tmp_path, capsys):
     run_data_quality_cli(str(csv_path))
 
     assert "DATA QUALITY REPORT" in capsys.readouterr().out
+
+
+def test_demo_cli_does_not_allow_real_mode(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        main_module.settings.model_copy(update={"BOT_MODE": "real", "ENABLE_REAL_TRADING": True}),
+    )
+
+    with pytest.raises(RuntimeError, match="Real trading is disabled"):
+        run_demo_cli(str(tmp_path / "missing.joblib"))
+
+
+def test_validate_cli_runs_with_synthetic_dataset(tmp_path, monkeypatch):
+    csv_path = tmp_path / "candles.csv"
+    rows = 180
+    prices = [100 + (index % 10) * 0.1 for index in range(rows)]
+    pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2026-01-01", periods=rows, freq="min", tz="UTC"),
+            "open": prices,
+            "high": [p + 0.3 for p in prices],
+            "low": [p - 0.3 for p in prices],
+            "close": [p + 0.05 for p in prices],
+            "volume": [100] * rows,
+        }
+    ).to_csv(csv_path, index=False)
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        main_module.settings.model_copy(
+            update={
+                "VALIDATION_TRAIN_WINDOW": 90,
+                "VALIDATION_TEST_WINDOW": 60,
+                "VALIDATION_STEP_SIZE": 30,
+                "VALIDATION_N_SPLITS": 2,
+                "MIN_TRADES_FOR_THRESHOLD": 5,
+                "MONTE_CARLO_SIMULATIONS": 10,
+                "MAX_ALLOWED_DRAWDOWN": 0.5,
+            }
+        ),
+    )
+
+    result = run_validate_cli(str(csv_path))
+
+    assert "report" in result
+
+
+def test_main_models_lists_models(tmp_path, monkeypatch):
+    monkeypatch.setattr(main_module, "settings", main_module.settings.model_copy(update={"MODEL_REGISTRY_PATH": str(tmp_path / "registry.json")}))
+
+    result = run_models_cli()
+
+    assert result == []
+
+
+def test_main_retrain_does_not_auto_promote(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        main_module.settings.model_copy(
+            update={
+                "MODEL_REGISTRY_PATH": str(tmp_path / "registry.json"),
+                "COLLECTED_CANDLES_PATH": str(tmp_path / "missing.csv"),
+                "AUTO_PROMOTE_MODELS": False,
+                "RETRAIN_MIN_NEW_CANDLES": 100,
+            }
+        ),
+    )
+
+    result = run_retrain_cli()
+
+    assert result["recommendation"] == "NEEDS_MORE_DATA"

@@ -365,6 +365,191 @@ pytest
 
 La conexion a brokers reales debe hacerse unicamente mediante APIs, websockets o metodos permitidos por el proveedor. El proyecto no usa automatizacion de pantalla, no automatiza clicks, no hace scraping agresivo, no intenta saltarse restricciones del broker y no activa trading real. Las credenciales futuras deben vivir en `.env` y no se imprimen en logs.
 
+## Demo Execution
+
+El proyecto distingue tres superficies de ejecucion:
+
+- `paper`: simulacion interna con `PaperBroker`.
+- `demo`: ejecucion contra un broker demo autorizado, o `demo_stub` para probar el flujo completo sin proveedor externo.
+- `real`: bloqueado por defecto y no usado por esta fase.
+
+`demo_stub` simula una cuenta demo externa y permite probar guardas, ordenes pendientes, resolucion, reconciliacion, SQLite, logs, dashboard y kill switch sin operar dinero real.
+
+Ejemplo de `.env` para demo controlada:
+
+```env
+BOT_MODE=demo
+BROKER=demo_stub
+DATA_FEED_SOURCE=mock_realtime
+ENABLE_REAL_TRADING=false
+KILL_SWITCH_PATH=data/logs/kill_switch.json
+EXECUTION_STATE_PATH=data/logs/execution_state.json
+```
+
+Comandos:
+
+```bash
+python -m app.main healthcheck
+python -m app.main demo
+python -m app.main reconcile
+python -m app.main summary
+python -m app.main kill-status
+python -m app.main kill-on "riesgo alto"
+python -m app.main kill-off
+pytest
+```
+
+El kill switch bloquea cualquier nueva orden demo/paper protegida por `ExecutionGuard`:
+
+```bash
+python -m app.main kill-on "riesgo alto"
+python -m app.main kill-status
+python -m app.main kill-off
+```
+
+`healthcheck` revisa configuracion, modelo, fuente de datos, base SQLite, kill switch y bloqueo de real trading:
+
+```bash
+python -m app.main healthcheck
+```
+
+`reconcile` busca ordenes `PENDING` en SQLite y consulta el broker demo para actualizar resultado, profit y balance:
+
+```bash
+python -m app.main reconcile
+```
+
+IQ Option y Exnova quedan como adaptadores preparados, pero sin ejecucion demo autorizada. Para habilitarlos haria falta una API, websocket o metodo permitido por el proveedor. Este proyecto no usa Selenium, PyAutoGUI, automatizacion visual, capturas de pantalla ni clicks sobre botones `SUBE` o `BAJA`.
+
+La ejecucion demo no garantiza resultados reales. En cuenta real existen latencia, slippage, restricciones del broker, cambios de payout, errores de conexion y riesgo de perdida total. Real trading sigue bloqueado.
+
+## Advanced Validation
+
+La validacion avanzada existe para detectar sobreajuste antes de pensar en cualquier conexion real. Un backtest ganador no es suficiente: el modelo puede haber aprendido ruido, condiciones muy especificas del pasado o una fuga accidental de informacion futura.
+
+Conceptos clave:
+
+- `Walk-forward validation`: entrena en una ventana antigua y evalua en una ventana futura. Luego mueve la ventana hacia adelante sin mezclar datos.
+- `Out-of-sample testing`: mide el modelo en datos no usados para entrenar ni seleccionar parametros.
+- `Time-series split`: respeta el orden temporal y usa `gap`; no usa `shuffle`.
+- `Threshold optimization`: busca el umbral de confianza que equilibra calidad de senal y cantidad minima de operaciones.
+- `Monte Carlo`: reordena operaciones para estimar riesgo, drawdown y probabilidad de terminar en ganancia. No garantiza rentabilidad.
+- `Stress testing`: simula payout menor, slippage, latencia, ruido y fallos de conexion.
+- `Stability score`: resume consistencia entre folds, thresholds y escenarios de stress.
+
+Comandos:
+
+```bash
+python -m app.main optimize
+python -m app.main validate
+python -m app.main walk-forward
+python -m app.main threshold-optimize
+python -m app.main monte-carlo
+python -m app.main stress-test
+python -m app.main leakage-audit
+python -m app.main validation-report
+pytest
+```
+
+Archivos generados:
+
+```text
+data/logs/walk_forward_results.csv
+data/logs/walk_forward_summary.json
+data/logs/hyperparameter_results.csv
+data/logs/threshold_optimization.csv
+data/logs/best_threshold.json
+data/logs/monte_carlo_results.csv
+data/logs/monte_carlo_summary.json
+data/logs/stress_test_results.csv
+data/logs/stress_test_summary.json
+data/logs/overfitting_report.json
+data/logs/model_stability_report.json
+data/logs/data_leakage_audit.json
+data/logs/final_validation_report.json
+data/logs/final_validation_report.md
+models/optimized_model.joblib
+```
+
+Recomendaciones posibles:
+
+- `REJECTED`: leakage critico, sobreajuste alto o estabilidad muy mala.
+- `PAPER_ONLY`: puede seguirse observando, pero no cumple criterios de demo.
+- `DEMO_ALLOWED`: cumple criterios estadisticos minimos para demo controlada, nunca real.
+- `NEEDS_MORE_DATA`: faltan folds, operaciones o muestra suficiente.
+
+`DEMO_ALLOWED` solo puede aparecer si no hay leakage critico, los folds rentables son suficientes, el profit factor promedio supera `1`, el win rate promedio supera breakeven, el drawdown esta controlado, el riesgo de overfitting no es `HIGH`, Monte Carlo tiene probabilidad de ganancia suficiente y stress moderado no falla.
+
+Un resultado positivo en validacion avanzada no garantiza ganancias reales. Solo reduce el riesgo de sobreajuste y ayuda a decidir si el sistema merece continuar en paper/demo.
+
+## MLOps and Continuous Demo Operation
+
+La fase MLOps permite correr sesiones largas en paper/demo con estado persistente, monitoreo, reportes diarios y ciclo controlado de modelos. No activa trading real y no promueve modelos automaticamente.
+
+Una sesion paper/demo guarda:
+
+- `data/logs/current_session.json`
+- `data/logs/runtime_state.json`
+- heartbeat de sesion
+- ultimo error
+- ultimo balance
+- ultimo resultado de operacion
+
+Comandos principales:
+
+```bash
+python -m app.main run-paper-session
+python -m app.main run-demo-session
+python -m app.main runtime-status
+python -m app.main drift-check
+python -m app.main retrain
+python -m app.main models
+python -m app.main promote MODEL_ID
+python -m app.main rollback MODEL_ID
+python -m app.main daily-report
+pytest
+```
+
+`runtime-status` muestra sesion actual, kill switch, estado runtime, metricas del bot y metricas basicas del sistema.
+
+`drift-check` revisa degradacion del modelo: caida de win rate, profit factor, confianza promedio, exceso de HOLD y perdida de edge.
+
+`retrain` usa `data/raw/collected_candles.csv`, valida calidad, entrena un candidato y lo registra en `models/model_registry.json`. El candidato queda como `CANDIDATE`; no reemplaza `models/best_model.joblib`.
+
+`models` lista el registro de modelos. Los estados son:
+
+- `CANDIDATE`
+- `STAGING`
+- `PRODUCTION`
+- `REJECTED`
+- `ARCHIVED`
+
+`promote MODEL_ID` solo promueve si el candidato cumple reglas de validacion, estabilidad, drawdown, profit factor, win rate, Monte Carlo y ausencia de leakage critico. Antes de reemplazar el modelo productivo se genera backup.
+
+`rollback MODEL_ID` restaura un modelo registrado anterior hacia `models/best_model.joblib`.
+
+`daily-report` genera:
+
+```text
+data/reports/daily_report_YYYYMMDD.json
+data/reports/daily_report_YYYYMMDD.md
+```
+
+Docker:
+
+```bash
+docker compose up --build
+```
+
+Servicios:
+
+- `bot`: ejecuta `python -m app.main healthcheck` por defecto.
+- `dashboard`: ejecuta Streamlit en `http://localhost:8501`.
+
+Los volumenes montan `./data` y `./models`. Docker no inicia trading real automaticamente.
+
+Un sistema estable en demo no garantiza ganancias reales. Antes de considerar cualquier entorno real se requieren semanas de ejecucion controlada, revision humana, cumplimiento de reglas del broker y analisis de riesgo.
+
 ## Comparar Reglas vs ML
 
 Compara la estrategia por reglas contra la estrategia ML usando el mismo motor de backtesting:

@@ -1,0 +1,2 @@
+timestamp,asset,signal,confidence,amount,entry_price,exit_price,result,profit,balance,reason,mode
+2026-05-10T12:00:00Z,EURUSD-OTC,BUY,0.7,10,100,101,WON,8.7,1008.7,ok,paper

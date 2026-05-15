@@ -1,0 +1,5 @@
+timestamp,candidate_model_id,current_model_id,candidate_score,current_score,recommendation,reason
+2026-05-15T11:34:39.073210+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.
+2026-05-15T11:34:40.620270+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.
+2026-05-15T11:35:20.063853+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.
+2026-05-15T11:35:21.633889+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.

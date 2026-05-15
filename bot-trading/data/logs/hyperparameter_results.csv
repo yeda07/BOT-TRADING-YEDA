@@ -1,0 +1,5 @@
+model,score,uses_shuffle
+LogisticRegression,0.9,False
+RandomForestClassifier,0.9,False
+GradientBoostingClassifier,0.9,False
+ExtraTreesClassifier,0.9,False

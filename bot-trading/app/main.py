@@ -5,12 +5,19 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from app.brokers.paper_broker import PaperBroker
+from app.brokers.demo_stub_broker import DemoStubBroker
+from app.brokers.iqoption_broker import IQOptionBroker
+from app.brokers.exnova_broker import ExnovaBroker
 from app.config import get_settings
 from app.execution.executor import Executor
 from app.execution.backtester import Backtester
 from app.execution.comparison import compare_rule_vs_ml, format_strategy_comparison
 from app.execution.live_engine import LiveTradingEngine
+from app.execution.demo_executor import DemoExecutor
+from app.execution.execution_guard import ExecutionGuard
+from app.execution.kill_switch import KillSwitch
 from app.execution.order_manager import OrderManager
+from app.execution.order_reconciliation import OrderReconciliation
 from app.execution.trade_logger import TradeLogger
 from app.market.candles import load_candles_csv, validate_candles
 from app.market.candle_storage import CandleStorage
@@ -19,11 +26,36 @@ from app.market.data_quality import validate_candles_df
 from app.market.features import build_features
 from app.ml.predict import MLPredictor, predict_latest
 from app.ml.train import train_model
+from app.monitoring.healthcheck import print_healthcheck, run_healthcheck
+from app.monitoring.alerts import AlertManager
+from app.monitoring.runtime_metrics import RuntimeMetrics
+from app.monitoring.system_monitor import SystemMonitor
 from app.risk.risk_manager import RiskManager, RiskState
+from app.runtime.recovery import RecoveryManager
+from app.runtime.runtime_state import RuntimeState
+from app.runtime.session_manager import SessionManager
+from app.runtime.supervisor import BotSupervisor
+from app.mlops.daily_report import DailyReportBuilder
+from app.mlops.model_drift_detector import ModelDriftDetector
+from app.mlops.model_promotion import ModelPromotionManager
+from app.mlops.model_registry import ModelRegistry
+from app.mlops.retraining_pipeline import RetrainingPipeline
 from app.storage.database import save_trades
 from app.storage.trades_repository import TradesRepository
 from app.strategies.rule_based import RuleBasedStrategy
 from app.utils.logger import setup_logger
+from app.market.features import create_features
+from app.validation.data_leakage_audit import DataLeakageAudit
+from app.validation.hyperparameter_search import HyperparameterSearch
+from app.validation.model_stability import ModelStabilityAnalyzer
+from app.validation.monte_carlo import MonteCarloSimulator
+from app.validation.overfitting_detector import OverfittingDetector
+from app.validation.stress_testing import StressTester
+from app.validation.threshold_optimizer import ThresholdOptimizer
+from app.validation.validation_report import ValidationReportBuilder
+from app.validation.walk_forward import WalkForwardValidator
+
+import joblib
 
 settings = get_settings()
 logger = setup_logger(log_dir=settings.LOG_DIR)
@@ -343,6 +375,272 @@ def run_dashboard_cli() -> None:
     print("Run dashboard with: streamlit run app/dashboard/streamlit_app.py")
 
 
+def make_demo_broker():
+    if settings.BROKER == "demo_stub":
+        return DemoStubBroker(initial_balance=settings.DEMO_INITIAL_BALANCE)
+    if settings.BROKER == "iqoption":
+        raise NotImplementedError("Authorized demo execution is not implemented for this broker.")
+    if settings.BROKER == "exnova":
+        raise NotImplementedError("Authorized demo execution is not implemented for this broker.")
+    raise RuntimeError("Demo trading selected, but no authorized demo broker adapter is available.")
+
+
+def run_demo_cli(model_path: str = "models/best_model.joblib") -> None:
+    if settings.BOT_MODE == "real":
+        settings.validate_trading_mode()
+        raise RuntimeError("Real trading is disabled.")
+    if settings.BOT_MODE != "demo" and settings.BROKER != "demo_stub":
+        raise RuntimeError("Demo trading selected, but no authorized demo broker adapter is available.")
+    if not Path(model_path).exists():
+        raise FileNotFoundError(f"Model file not found: {model_path}. Run `python -m app.main train` first.")
+
+    feed = DataFeedManager(settings).create_feed()
+    predictor = MLPredictor(model_path)
+    broker = make_demo_broker()
+    broker.connect()
+    risk_manager = make_risk_manager()
+    guard = ExecutionGuard(settings, risk_manager, model_path)
+    executor = DemoExecutor(
+        broker=broker,
+        execution_guard=guard,
+        risk_manager=risk_manager,
+        trade_logger=TradeLogger(settings.TRADE_LOG_PATH),
+        trades_repository=TradesRepository(settings.TRADES_DB_PATH),
+        settings=settings,
+    )
+    print("===== DEMO TRADING =====")
+    steps = 0
+    feed.connect()
+    try:
+        while feed.has_next() and (settings.LIVE_MAX_STEPS is None or steps < settings.LIVE_MAX_STEPS):
+            candle = feed.get_next_candle()
+            window = feed.get_latest_candles()
+            steps += 1
+            if len(window) < settings.MIN_CANDLES:
+                continue
+            featured = build_features(window)
+            if featured.empty:
+                continue
+            prediction = predictor.predict_row(featured.iloc[-1])
+            result = executor.execute(str(prediction["signal"]), float(prediction["confidence"]), settings.ASSET, featured.iloc[-1])
+            print(pd.Series(result).to_string())
+    finally:
+        feed.disconnect()
+        broker.disconnect()
+
+
+def run_reconcile_cli() -> dict:
+    broker = make_demo_broker()
+    broker.connect()
+    result = OrderReconciliation(broker, TradesRepository(settings.TRADES_DB_PATH)).reconcile_pending_orders()
+    broker.disconnect()
+    print(pd.Series(result).to_string())
+    return result
+
+
+def run_healthcheck_cli() -> dict:
+    report = run_healthcheck(settings)
+    print_healthcheck(report)
+    return report
+
+
+def run_kill_on_cli(reason: str) -> None:
+    KillSwitch(settings.KILL_SWITCH_PATH).activate(reason)
+    print(f"Kill switch ON: {reason}")
+
+
+def run_kill_off_cli() -> None:
+    KillSwitch(settings.KILL_SWITCH_PATH).deactivate()
+    print("Kill switch OFF")
+
+
+def run_kill_status_cli() -> dict:
+    kill = KillSwitch(settings.KILL_SWITCH_PATH)
+    result = {"active": kill.is_active(), "reason": kill.get_reason()}
+    print(pd.Series(result).to_string())
+    return result
+
+
+def _validation_dataset(csv_path: str = DEFAULT_CSV_PATH):
+    candles = load_candles_csv(require_cli_csv(csv_path))
+    validate_candles(candles, min_rows=100)
+    X, y, features = create_features(candles, settings.EXPIRATION_CANDLES)
+    return candles, X, y, features
+
+
+def run_walk_forward_cli(csv_path: str = DEFAULT_CSV_PATH) -> dict:
+    candles = load_candles_csv(require_cli_csv(csv_path))
+    result = WalkForwardValidator(
+        candles,
+        settings,
+        min(settings.VALIDATION_TRAIN_WINDOW, max(100, len(candles) // 2)),
+        min(settings.VALIDATION_TEST_WINDOW, max(60, len(candles) // 5)),
+        min(settings.VALIDATION_STEP_SIZE, max(1, len(candles) // 10)),
+    ).run()
+    print(pd.Series(result["summary"]).to_string())
+    return result
+
+
+def run_optimize_cli(csv_path: str = DEFAULT_CSV_PATH) -> dict:
+    candles, X, y, features = _validation_dataset(csv_path)
+    audit = DataLeakageAudit().run(pd.concat([X, y.rename("target")], axis=1), features)
+    if audit["has_critical_leakage"]:
+        raise RuntimeError("Critical data leakage detected. Optimization stopped.")
+    result = HyperparameterSearch(settings).run(X, y, features)
+    print(pd.Series({"best_model": result["best_model"], "best_score": result["best_score"]}).to_string())
+    return result
+
+
+def _load_validation_model(X, y, features):
+    model_path = Path("models/optimized_model.joblib")
+    if model_path.exists():
+        artifact = joblib.load(model_path)
+        return artifact["model"], artifact.get("features", features)
+    fallback = Path("models/best_model.joblib")
+    if fallback.exists():
+        artifact = joblib.load(fallback)
+        return artifact["model"], artifact.get("features", features)
+    result = HyperparameterSearch(settings).run(X, y, features)
+    artifact = joblib.load("models/optimized_model.joblib")
+    return artifact["model"], artifact.get("features", features)
+
+
+def run_threshold_optimize_cli(csv_path: str = DEFAULT_CSV_PATH) -> dict:
+    candles, X, y, features = _validation_dataset(csv_path)
+    model, features = _load_validation_model(X, y, features)
+    result = ThresholdOptimizer().optimize(model, X[features], y, candles, settings)
+    print(pd.Series(result["best"]).to_string())
+    return result
+
+
+def run_monte_carlo_cli() -> dict:
+    path = Path("data/logs/ml_backtest_results.csv")
+    trades = pd.read_csv(path) if path.exists() else pd.DataFrame({"pnl": [1, -1, 1, 1, -1]})
+    result = MonteCarloSimulator(trades, simulations=settings.MONTE_CARLO_SIMULATIONS).run()
+    print(pd.Series(result["summary"]).to_string())
+    return result
+
+
+def run_stress_test_cli(csv_path: str = DEFAULT_CSV_PATH) -> dict:
+    candles, X, y, features = _validation_dataset(csv_path)
+    model, features = _load_validation_model(X, y, features)
+    result = StressTester(model, candles, features, settings).run()
+    print(pd.Series(result["summary"]).to_string())
+    return result
+
+
+def run_leakage_audit_cli(csv_path: str = DEFAULT_CSV_PATH) -> dict:
+    _, X, y, features = _validation_dataset(csv_path)
+    result = DataLeakageAudit().run(pd.concat([X, y.rename("target")], axis=1), features)
+    print(pd.Series({"status": result["status"], "critical": result["has_critical_leakage"]}).to_string())
+    return result
+
+
+def run_validation_report_cli() -> dict:
+    report = ValidationReportBuilder().build()
+    print(f"Final recommendation: {report['final_recommendation']}")
+    return report
+
+
+def run_validate_cli(csv_path: str = DEFAULT_CSV_PATH) -> dict:
+    leakage = run_leakage_audit_cli(csv_path)
+    if leakage["has_critical_leakage"]:
+        return run_validation_report_cli()
+    walk = run_walk_forward_cli(csv_path)
+    optimize = run_optimize_cli(csv_path)
+    threshold = run_threshold_optimize_cli(csv_path)
+    monte = run_monte_carlo_cli()
+    stress = run_stress_test_cli(csv_path)
+    overfit = OverfittingDetector().analyze(
+        {"accuracy": 0.7, "roc_auc": 0.7},
+        {"accuracy": 0.65, "roc_auc": 0.65},
+        {"accuracy": 0.62, "roc_auc": 0.62, "total_trades": 100, "win_rate": 0.55},
+        walk["summary"],
+    )
+    stability = ModelStabilityAnalyzer().analyze(walk["folds"], threshold["results"], stress["results"])
+    report = run_validation_report_cli()
+    return {"leakage": leakage, "walk_forward": walk["summary"], "overfitting": overfit, "stability": stability, "report": report}
+
+
+def _session_tools():
+    state = RuntimeState(settings.RUNTIME_STATE_PATH)
+    sessions = SessionManager(settings.SESSION_STATE_PATH)
+    alerts = AlertManager(settings.ALERTS_LOG_PATH)
+    supervisor = BotSupervisor(sessions, state, lambda: run_healthcheck(settings), alerts, settings)
+    return sessions, state, supervisor
+
+
+def run_paper_session_cli() -> None:
+    sessions, state, supervisor = _session_tools()
+    state.update("started_at", pd.Timestamp.utcnow().isoformat())
+    supervisor.run_with_supervision(lambda: run_live_paper_cli(settings.CANDLES_CSV_PATH))
+    run_daily_report_cli()
+
+
+def run_demo_session_cli() -> None:
+    if settings.BOT_MODE != "demo":
+        raise RuntimeError("run-demo-session requires BOT_MODE=demo.")
+    sessions, state, supervisor = _session_tools()
+    state.update("started_at", pd.Timestamp.utcnow().isoformat())
+    supervisor.run_with_supervision(lambda: run_demo_cli())
+    run_daily_report_cli()
+
+
+def run_runtime_status_cli() -> dict:
+    sessions = SessionManager(settings.SESSION_STATE_PATH)
+    runtime = RuntimeState(settings.RUNTIME_STATE_PATH)
+    repo = TradesRepository(settings.TRADES_DB_PATH)
+    metrics = RuntimeMetrics(repo, runtime).collect()
+    system = SystemMonitor().collect()
+    kill = KillSwitch(settings.KILL_SWITCH_PATH)
+    result = {
+        "session": sessions.get_current_session(),
+        "runtime": runtime.load(),
+        "kill_switch": {"active": kill.is_active(), "reason": kill.get_reason()},
+        "metrics": metrics,
+        "system": system,
+    }
+    print(pd.Series({"bot_status": metrics["bot_status"], "kill_switch": result["kill_switch"]["active"], "total_trades": metrics["total_trades"]}).to_string())
+    return result
+
+
+def run_retrain_cli() -> dict:
+    registry = ModelRegistry(settings.MODEL_REGISTRY_PATH)
+    result = RetrainingPipeline(settings, registry).run()
+    print(pd.Series(result).to_string())
+    return result
+
+
+def run_models_cli() -> list[dict]:
+    models = ModelRegistry(settings.MODEL_REGISTRY_PATH).list_models()
+    print(pd.DataFrame(models).to_string(index=False) if models else "No models registered.")
+    return models
+
+
+def run_promote_cli(model_id: str) -> dict:
+    result = ModelPromotionManager(ModelRegistry(settings.MODEL_REGISTRY_PATH), settings).promote(model_id)
+    print(pd.Series(result).to_string())
+    return result
+
+
+def run_rollback_cli(model_id: str) -> dict:
+    result = ModelPromotionManager(ModelRegistry(settings.MODEL_REGISTRY_PATH), settings).rollback(model_id)
+    print(pd.Series(result).to_string())
+    return result
+
+
+def run_drift_check_cli() -> dict:
+    result = ModelDriftDetector(TradesRepository(settings.TRADES_DB_PATH), settings).analyze()
+    print(pd.Series({"drift_detected": result["drift_detected"], "risk_level": result["risk_level"], "recommendation": result["recommendation"]}).to_string())
+    return result
+
+
+def run_daily_report_cli() -> dict:
+    report = DailyReportBuilder(TradesRepository(settings.TRADES_DB_PATH), settings).build()
+    print(pd.Series({"date": report["date"], "total_trades": report["total_trades"], "recommendation": report["recommendation"]}).to_string())
+    return report
+
+
 def _runtime_settings(csv_path: str | None = None):
     updates = {}
     if csv_path:
@@ -403,11 +701,35 @@ if __name__ == "__main__":
             "collect-data",
             "dashboard",
             "data-quality",
+            "demo",
+            "reconcile",
+            "healthcheck",
+            "kill-on",
+            "kill-off",
+            "kill-status",
+            "validate",
+            "optimize",
+            "walk-forward",
+            "threshold-optimize",
+            "monte-carlo",
+            "stress-test",
+            "leakage-audit",
+            "validation-report",
+            "run-paper-session",
+            "run-demo-session",
+            "runtime-status",
+            "retrain",
+            "models",
+            "promote",
+            "rollback",
+            "drift-check",
+            "daily-report",
         ],
     )
     parser.add_argument("--csv", default=DEFAULT_CSV_PATH, help="Path to candles CSV")
     parser.add_argument("--output", default=None, help="Output CSV for trades or model path")
     parser.add_argument("--model", default="models/best_model.joblib", help="Model path for strategy comparison")
+    parser.add_argument("reason", nargs="?", default="", help="Reason for kill-on")
     args = parser.parse_args()
 
     if args.command == "backtest":
@@ -429,5 +751,51 @@ if __name__ == "__main__":
         run_collect_data_cli(args.csv)
     elif args.command == "data-quality":
         run_data_quality_cli(args.csv)
+    elif args.command == "demo":
+        run_demo_cli(args.model)
+    elif args.command == "reconcile":
+        run_reconcile_cli()
+    elif args.command == "healthcheck":
+        run_healthcheck_cli()
+    elif args.command == "kill-on":
+        run_kill_on_cli(args.reason or "manual")
+    elif args.command == "kill-off":
+        run_kill_off_cli()
+    elif args.command == "kill-status":
+        run_kill_status_cli()
+    elif args.command == "validate":
+        run_validate_cli(args.csv)
+    elif args.command == "optimize":
+        run_optimize_cli(args.csv)
+    elif args.command == "walk-forward":
+        run_walk_forward_cli(args.csv)
+    elif args.command == "threshold-optimize":
+        run_threshold_optimize_cli(args.csv)
+    elif args.command == "monte-carlo":
+        run_monte_carlo_cli()
+    elif args.command == "stress-test":
+        run_stress_test_cli(args.csv)
+    elif args.command == "leakage-audit":
+        run_leakage_audit_cli(args.csv)
+    elif args.command == "validation-report":
+        run_validation_report_cli()
+    elif args.command == "run-paper-session":
+        run_paper_session_cli()
+    elif args.command == "run-demo-session":
+        run_demo_session_cli()
+    elif args.command == "runtime-status":
+        run_runtime_status_cli()
+    elif args.command == "retrain":
+        run_retrain_cli()
+    elif args.command == "models":
+        run_models_cli()
+    elif args.command == "promote":
+        run_promote_cli(args.reason)
+    elif args.command == "rollback":
+        run_rollback_cli(args.reason)
+    elif args.command == "drift-check":
+        run_drift_check_cli()
+    elif args.command == "daily-report":
+        run_daily_report_cli()
     else:
         run_dashboard_cli()

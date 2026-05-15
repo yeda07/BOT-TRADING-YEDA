@@ -1,0 +1,10 @@
+{
+  "drift_detected": true,
+  "risk_level": "HIGH",
+  "warnings": [
+    "Win rate dropped below acceptable edge.",
+    "Profit factor deteriorated.",
+    "Average confidence dropped."
+  ],
+  "recommendation": "Retrain and validate candidate."
+}

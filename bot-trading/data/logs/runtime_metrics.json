@@ -1,0 +1,14 @@
+{
+  "bot_status": "RUNNING",
+  "current_balance": 0.0,
+  "total_trades": 0,
+  "win_rate": 0.0,
+  "profit_factor": 0.0,
+  "net_profit": 0,
+  "max_drawdown": 0.0,
+  "last_signal": null,
+  "last_confidence": null,
+  "last_trade_result": null,
+  "last_error": null,
+  "uptime_seconds": 0.0
+}

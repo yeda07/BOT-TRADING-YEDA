@@ -1,0 +1,7 @@
+timestamp,asset,signal,confidence,amount,entry_price,exit_price,result,profit,balance,reason,mode
+2026-05-10 00:59:00+00:00,EURUSD-OTC,BUY,0.9,10.0,105.95,106.05,WON,8.7,1008.7,Order sent to paper broker and pending resolution.,paper
+2026-05-10 01:01:00+00:00,EURUSD-OTC,BUY,0.9,10.087000000000002,106.15,106.25,WON,8.77569,1017.4756900000001,Order sent to paper broker and pending resolution.,paper
+2026-05-10 01:03:00+00:00,EURUSD-OTC,BUY,0.9,10.174756900000002,106.35,106.45,WON,8.852038503000001,1026.3277285030001,Order sent to paper broker and pending resolution.,paper
+2026-05-10 01:05:00+00:00,EURUSD-OTC,BUY,0.9,10.263277285030002,106.55,106.65,WON,8.929051237976102,1035.2567797409763,Order sent to paper broker and pending resolution.,paper
+2026-05-10 01:07:00+00:00,EURUSD-OTC,BUY,0.9,10.352567797409764,106.75,106.85,WON,9.006733983746495,1044.2635137247228,Order sent to paper broker and pending resolution.,paper
+2026-05-10 01:09:00+00:00,EURUSD-OTC,BUY,0.9,10.442635137247228,106.95,107.05,WON,9.085092569405088,1053.3486062941279,Order sent to paper broker and pending resolution.,paper

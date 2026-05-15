@@ -1,7 +1,8 @@
 from app.brokers.base import BrokerBase, OrderResult, rejected_order
+from app.brokers.demo_broker_base import DemoBrokerBase
 
 
-class ExnovaBroker(BrokerBase):
+class ExnovaBroker(BrokerBase, DemoBrokerBase):
     """Prepared adapter for future demo-only Exnova integration.
 
     Real trading, browser automation, click automation, safety bypasses and
@@ -33,3 +34,12 @@ class ExnovaBroker(BrokerBase):
 
     def place_order(self, asset: str, amount: float, direction: str, expiration: int) -> OrderResult:
         return rejected_order(asset, amount, direction, expiration, "Real broker execution is not enabled.")
+
+    def place_demo_order(self, asset: str, amount: float, direction: str, expiration_seconds: int) -> dict:
+        raise NotImplementedError("Authorized demo execution is not implemented for this broker.")
+
+    def get_order_status(self, order_id: str) -> dict:
+        raise NotImplementedError("Authorized demo execution is not implemented for this broker.")
+
+    def get_account_type(self) -> str:
+        return "demo"

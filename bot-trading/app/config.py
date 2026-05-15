@@ -7,7 +7,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 BotMode = Literal["backtest", "paper", "demo", "real"]
-BrokerName = Literal["paper", "iqoption", "exnova"]
+BrokerName = Literal["paper", "demo_stub", "iqoption", "exnova"]
 DataFeedSource = Literal["csv", "mock_realtime", "iqoption_demo", "exnova_demo"]
 
 
@@ -29,6 +29,9 @@ class Settings(BaseSettings):
     MAX_DAILY_LOSS: float = Field(default=0.05, ge=0.0, le=0.10)
     MAX_CONSECUTIVE_LOSSES: int = Field(default=3, ge=0)
     MIN_CONFIDENCE: float = Field(default=0.58, ge=0.0, le=1.0)
+    MAX_ALLOWED_DRAWDOWN: float = Field(default=0.15, ge=0.0, le=1.0)
+    MIN_PROFIT_FACTOR: float = Field(default=1.0, ge=0.0)
+    MIN_TRADES_BEFORE_LIVE: int = Field(default=100, ge=0)
 
     # Backward-compatible aliases used by older configs.
     MAX_DAILY_LOSS_PCT: float = 0.05
@@ -50,6 +53,33 @@ class Settings(BaseSettings):
     LIVE_SLEEP_SECONDS: float = Field(default=1.0, ge=0.0)
     TRADE_LOG_PATH: str = "data/logs/live_trades.csv"
     TRADES_DB_PATH: str = "data/logs/trades.db"
+    KILL_SWITCH_PATH: str = "data/logs/kill_switch.json"
+    EXECUTION_STATE_PATH: str = "data/logs/execution_state.json"
+    ALERTS_LOG_PATH: str = "data/logs/alerts.log"
+    DEMO_INITIAL_BALANCE: float = 3000.0
+    VALIDATION_TRAIN_WINDOW: int = Field(default=2000, ge=100)
+    VALIDATION_TEST_WINDOW: int = Field(default=500, ge=50)
+    VALIDATION_STEP_SIZE: int = Field(default=250, ge=1)
+    VALIDATION_N_SPLITS: int = Field(default=5, ge=2)
+    VALIDATION_GAP: int = Field(default=1, ge=0)
+    MIN_TRADES_FOR_THRESHOLD: int = Field(default=100, ge=1)
+    MIN_PROFITABLE_FOLDS_RATIO: float = Field(default=0.60, ge=0.0, le=1.0)
+    MAX_OVERFITTING_GAP: float = Field(default=0.10, ge=0.0, le=1.0)
+    MIN_STABILITY_SCORE: float = Field(default=0.60, ge=0.0, le=1.0)
+    MONTE_CARLO_SIMULATIONS: int = Field(default=1000, ge=1)
+    STRESS_TEST_ENABLED: bool = True
+    SESSION_STATE_PATH: str = "data/logs/current_session.json"
+    RUNTIME_STATE_PATH: str = "data/logs/runtime_state.json"
+    MODEL_REGISTRY_PATH: str = "models/model_registry.json"
+    MODEL_VERSIONS_DIR: str = "models/versions"
+    REPORTS_DIR: str = "data/reports"
+    RETRAIN_MIN_NEW_CANDLES: int = Field(default=1000, ge=1)
+    AUTO_PROMOTE_MODELS: bool = False
+    DRIFT_MIN_TRADES: int = Field(default=100, ge=1)
+    DRIFT_WIN_RATE_DROP: float = Field(default=0.05, ge=0.0, le=1.0)
+    DRIFT_PROFIT_FACTOR_DROP: float = Field(default=0.20, ge=0.0)
+    SUPERVISOR_HEARTBEAT_SECONDS: int = Field(default=30, ge=1)
+    MAX_RUNTIME_ERRORS: int = Field(default=5, ge=1)
 
     IQOPTION_EMAIL: str | None = None
     IQOPTION_PASSWORD: str | None = None

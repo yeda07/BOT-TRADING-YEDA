@@ -1,0 +1,121 @@
+{
+  "model_metrics": [
+    {
+      "model": "LogisticRegression",
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0,
+      "total_samples": 33
+    },
+    {
+      "model": "RandomForestClassifier",
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0,
+      "total_samples": 33
+    },
+    {
+      "model": "GradientBoostingClassifier",
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0,
+      "total_samples": 33
+    },
+    {
+      "model": "ExtraTreesClassifier",
+      "accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0,
+      "total_samples": 33
+    }
+  ],
+  "walk_forward_summary": {
+    "total_folds": 1,
+    "profitable_folds_ratio": 1,
+    "average_profit_factor": 1.2,
+    "average_win_rate": 0.6,
+    "average_drawdown": 0.05
+  },
+  "threshold_optimization": [
+    {
+      "threshold": 0.52,
+      "total_trades": 140,
+      "win_rate": 1.0,
+      "breakeven_win_rate": 0.53475935828877,
+      "edge": 0.46524064171123,
+      "net_profit": 121.8,
+      "profit_factor": Infinity,
+      "max_drawdown": 0.0,
+      "average_profit_per_trade": 0.8700000000000001
+    },
+    {
+      "threshold": 0.54,
+      "total_trades": 140,
+      "win_rate": 1.0,
+      "breakeven_win_rate": 0.53475935828877,
+      "edge": 0.46524064171123,
+      "net_profit": 121.8,
+      "profit_factor": Infinity,
+      "max_drawdown": 0.0,
+      "average_profit_per_trade": 0.8700000000000001
+    },
+    {
+      "threshold": 0.56,
+      "total_trades": 140,
+      "win_rate": 1.0,
+      "breakeven_win_rate": 0.53475935828877,
+      "edge": 0.46524064171123,
+      "net_profit": 121.8,
+      "profit_factor": Infinity,
+      "max_drawdown": 0.0,
+      "average_profit_per_trade": 0.8700000000000001
+    },
+    {
+      "threshold": 0.58,
+      "total_trades": 140,
+      "win_rate": 1.0,
+      "breakeven_win_rate": 0.53475935828877,
+      "edge": 0.46524064171123,
+      "net_profit": 121.8,
+      "profit_factor": Infinity,
+      "max_drawdown": 0.0,
+      "average_profit_per_trade": 0.8700000000000001
+    },
+    {
+      "threshold": 0.6,
+      "total_trades": 140,
+      "win_rate": 1.0,
+      "breakeven_win_rate": 0.53475935828877,
+      "edge": 0.46524064171123,
+      "net_profit": 121.8,
+      "profit_factor": Infinity,
+      "max_drawdown": 0.0,
+      "average_profit_per_trade": 0.8700000000000001
+    }
+  ],
+  "monte_carlo_summary": {
+    "probability_of_profit": 0.7
+  },
+  "stress_test_summary": {
+    "moderate_stress_passed": true
+  },
+  "overfitting_report": {
+    "risk_level": "LOW"
+  },
+  "model_stability_report": {
+    "stability_score": 0.8,
+    "status": "STABLE"
+  },
+  "data_leakage_audit": {
+    "has_critical_leakage": false
+  },
+  "final_recommendation": "DEMO_ALLOWED"
+}

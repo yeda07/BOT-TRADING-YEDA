@@ -16,6 +16,7 @@ TRADE_FIELDS = [
     "balance",
     "reason",
     "mode",
+    "order_id",
 ]
 
 
@@ -43,10 +44,12 @@ class TradesRepository:
                     balance REAL,
                     reason TEXT,
                     mode TEXT,
+                    order_id TEXT,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            self._ensure_column(connection, "order_id", "TEXT")
 
     def insert_trade(self, trade: dict) -> None:
         values = [_sqlite_value(trade.get(field)) for field in TRADE_FIELDS]
@@ -61,6 +64,18 @@ class TradesRepository:
         with self._connect() as connection:
             rows = connection.execute("SELECT * FROM trades ORDER BY id").fetchall()
         return [dict(row) for row in rows]
+
+    def get_pending_trades(self) -> list[dict]:
+        with self._connect() as connection:
+            rows = connection.execute("SELECT * FROM trades WHERE result='PENDING' ORDER BY id").fetchall()
+        return [dict(row) for row in rows]
+
+    def update_trade_result(self, order_id: str, result: str, profit: float, balance: float) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "UPDATE trades SET result=?, profit=?, balance=? WHERE order_id=?",
+                (result, profit, balance, order_id),
+            )
 
     def get_summary(self) -> dict:
         trades = self.get_all_trades()
@@ -82,6 +97,11 @@ class TradesRepository:
         connection = sqlite3.connect(self.db_path)
         connection.row_factory = sqlite3.Row
         return connection
+
+    def _ensure_column(self, connection: sqlite3.Connection, column: str, column_type: str) -> None:
+        existing = [row["name"] for row in connection.execute("PRAGMA table_info(trades)").fetchall()]
+        if column not in existing:
+            connection.execute(f"ALTER TABLE trades ADD COLUMN {column} {column_type}")
 
 
 def _sqlite_value(value):
