@@ -1,0 +1,21 @@
+# Daily Trading Report
+
+- date: 20260515
+- mode: backtest
+- broker: paper
+- asset: EURUSD-OTC
+- total_trades: 0
+- wins: 0
+- losses: 0
+- win_rate: 0.0
+- breakeven_win_rate: 0.53475935828877
+- profit_factor: 0.0
+- net_profit: 0.0
+- max_drawdown: 0.0
+- consecutive_losses: 0
+- average_confidence: 0.0
+- best_trade: 0.0
+- worst_trade: 0.0
+- drift_status: {'drift_detected': False, 'risk_level': 'LOW', 'warnings': ['Not enough trades for drift analysis.'], 'recommendation': 'Keep collecting paper/demo data.'}
+- kill_switch: {'active': True, 'reason': 'ML model is blocked from demo mode. Observed test metrics: win_rate=0.00%, profit_factor=0.000, roc_auc=0.000, total_trades=0, max_drawdown=0.00%.'}
+- recommendation: Keep collecting paper/demo data.

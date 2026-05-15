@@ -3,3 +3,6 @@ timestamp,candidate_model_id,current_model_id,candidate_score,current_score,reco
 2026-05-15T11:34:40.620270+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.
 2026-05-15T11:35:20.063853+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.
 2026-05-15T11:35:21.633889+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.
+2026-05-15T12:45:32.509061+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Not enough new candles.
+2026-05-15T12:46:11.117896+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.
+2026-05-15T12:46:12.277878+00:00,,,0.0,0.0,NEEDS_MORE_DATA,Collected candles file not found.

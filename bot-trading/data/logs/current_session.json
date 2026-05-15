@@ -1,0 +1,12 @@
+{
+  "session_id": "e41c281b-64e8-4353-80b3-8a4fd8f0cc24",
+  "mode": "backtest",
+  "asset": "EURUSD-OTC",
+  "broker": "paper",
+  "data_feed": "mock_realtime",
+  "started_at": "2026-05-15T12:17:06.030301+00:00",
+  "ended_at": "2026-05-15T12:18:49.255307+00:00",
+  "status": "STOPPED",
+  "heartbeat_at": "2026-05-15T12:18:49.231480+00:00",
+  "reason": "completed"
+}
