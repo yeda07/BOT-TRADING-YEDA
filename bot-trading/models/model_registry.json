@@ -1,3 +1,19 @@
 {
-  "models": []
+  "models": [
+    {
+      "model_id": "a3ce22c5-0e68-4607-8da7-14fa259c14b9",
+      "path": "models\\best_model.joblib",
+      "created_at": "2026-05-15T14:24:17.756020+00:00",
+      "metrics": {
+        "source": "final_validation_report",
+        "final_recommendation": "DEMO_ALLOWED",
+        "average_win_rate": 0.6,
+        "average_profit_factor": 1.2,
+        "stability_score": 0.8
+      },
+      "status": "PRODUCTION",
+      "validation_report_path": "data/logs/final_validation_report.json",
+      "notes": ""
+    }
+  ]
 }

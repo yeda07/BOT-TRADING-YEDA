@@ -1,7 +1,7 @@
 {
-  "date": "20260515",
+  "date": "20260516",
   "scope": "historical_all_sessions_and_current_session",
-  "session_id": "be8a6a77-1298-48ee-ac09-c17496ec21df",
+  "session_id": "49066cd2-78cf-4c3c-b3b3-9ef9b79f4311",
   "mode": "paper",
   "broker": "paper",
   "asset": "EURUSD-OTC",
@@ -16,6 +16,7 @@
   "historical_profit": 193.03367256713145,
   "session_balance_start": 3000.0,
   "session_balance_end": 3193.0336725671314,
+  "duplicate_data_window_detected": false,
   "max_drawdown": 0.02125939869999987,
   "consecutive_losses": 2,
   "average_confidence": 0.5777774760257863,

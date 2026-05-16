@@ -1,12 +1,17 @@
 {
-  "session_id": "e41c281b-64e8-4353-80b3-8a4fd8f0cc24",
-  "mode": "backtest",
+  "session_id": "49066cd2-78cf-4c3c-b3b3-9ef9b79f4311",
+  "mode": "paper",
   "asset": "EURUSD-OTC",
   "broker": "paper",
   "data_feed": "mock_realtime",
-  "started_at": "2026-05-15T12:17:06.030301+00:00",
-  "ended_at": "2026-05-15T12:18:49.255307+00:00",
+  "started_at": "2026-05-16T08:15:24.648111+00:00",
+  "ended_at": "2026-05-16T08:15:38.990283+00:00",
   "status": "STOPPED",
-  "heartbeat_at": "2026-05-15T12:18:49.231480+00:00",
-  "reason": "completed"
+  "heartbeat_at": "2026-05-16T08:15:38.976977+00:00",
+  "reason": "completed",
+  "data_start_timestamp": "2026-01-01 00:00:00+00:00",
+  "data_end_timestamp": "2026-01-01 05:59:00+00:00",
+  "feed_start_index": 0,
+  "feed_end_index": 359,
+  "candle_count_processed": 360
 }

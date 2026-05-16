@@ -60,3 +60,30 @@ def test_live_trading_engine_runs_with_small_step_limit(tmp_path):
     assert summary["total_trades"] >= 1
     assert summary["wins"] >= 1
     assert logger.read_trades()["result"].isin(["WON"]).any()
+
+
+def test_live_trading_engine_prints_warmup_until_feature_window(tmp_path, capsys):
+    csv_path = tmp_path / "candles.csv"
+    candles(40).to_csv(csv_path, index=False)
+    broker = PaperBroker(initial_balance=1000)
+    broker.connect()
+    settings = SimpleNamespace(
+        ASSET="EURUSD-OTC",
+        BOT_MODE="paper",
+        MIN_CANDLES=10,
+        FEATURE_WINDOW_SIZE=30,
+        LIVE_MAX_STEPS=5,
+        LIVE_SLEEP_SECONDS=0,
+    )
+    engine = LiveTradingEngine(
+        data_feed=CSVDataFeed(str(csv_path), window_size=30),
+        predictor=AlwaysBuyPredictor(),
+        order_manager=OrderManager(broker, RiskManager(balance=1000, min_model_confidence=0.58, min_candles=10), payout=0.87, expiration_candles=1),
+        trade_logger=TradeLogger(str(tmp_path / "live_trades.csv")),
+        trades_repository=TradesRepository(str(tmp_path / "trades.db")),
+        settings=settings,
+    )
+
+    engine.run()
+
+    assert "Warm-up: current candles" in capsys.readouterr().out

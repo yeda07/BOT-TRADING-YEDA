@@ -38,13 +38,13 @@ class ModelPromotionManager:
         if current:
             self.model_registry.set_status(current["model_id"], "ARCHIVED")
         model = self.model_registry.get_model(candidate_model_id)
-        copy_to_production(model["path"])
+        copy_to_production(model["path"], self._production_model_path())
         self.model_registry.set_status(candidate_model_id, "PRODUCTION")
         return {"promoted": True, "model_id": candidate_model_id}
 
     def rollback(self, model_id: str) -> dict:
         model = self.model_registry.get_model(model_id)
-        rollback_model(model["path"])
+        rollback_model(model["path"], self._production_model_path())
         current = self.model_registry.get_current_model()
         if current:
             self.model_registry.set_status(current["model_id"], "ARCHIVED")
@@ -55,3 +55,6 @@ class ModelPromotionManager:
         if path and Path(path).exists():
             return json.loads(Path(path).read_text(encoding="utf-8"))
         return {}
+
+    def _production_model_path(self) -> str:
+        return str(getattr(self.settings, "PRODUCTION_MODEL_PATH", "models/best_model.joblib"))

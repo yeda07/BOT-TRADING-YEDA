@@ -1,0 +1,9 @@
+{
+  "source": "mock_realtime",
+  "csv_path": "data/raw/candles.csv",
+  "asset": "EURUSD-OTC",
+  "timeframe_seconds": 60,
+  "last_index": 359,
+  "last_timestamp": "2026-01-01 05:59:00+00:00",
+  "updated_at": "2026-05-16T08:15:38.842946+00:00"
+}

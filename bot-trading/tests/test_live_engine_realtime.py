@@ -46,7 +46,7 @@ def test_live_engine_runs_with_mock_realtime_feed_and_stores_candles(tmp_path):
     storage = CandleStorage(str(tmp_path / "collected.csv"))
     repository = TradesRepository(str(tmp_path / "trades.db"))
     engine = LiveTradingEngine(
-        data_feed=MockRealtimeDataFeed(str(csv_path), window_size=70, max_steps=65),
+        data_feed=MockRealtimeDataFeed(str(csv_path), window_size=70, max_steps=65, cursor_path=str(tmp_path / "feed_cursor.json")),
         predictor=AlwaysBuyPredictor(),
         order_manager=OrderManager(
             broker,

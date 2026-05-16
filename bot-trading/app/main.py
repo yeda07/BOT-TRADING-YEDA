@@ -1,4 +1,7 @@
 from pathlib import Path
+import json
+import shutil
+from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException
@@ -21,9 +24,11 @@ from app.execution.order_reconciliation import OrderReconciliation
 from app.execution.trade_logger import TradeLogger
 from app.market.candles import load_candles_csv, validate_candles
 from app.market.candle_storage import CandleStorage
+from app.market.candle_schema import normalize_candles
 from app.market.data_feed_manager import DataFeedManager
 from app.market.data_quality import validate_candles_df
 from app.market.features import build_features
+from app.market.mock_realtime_feed import EndOfFeedError
 from app.ml.predict import MLPredictor, predict_latest
 from app.ml.train import train_model
 from app.monitoring.healthcheck import print_healthcheck, run_healthcheck
@@ -264,55 +269,189 @@ def run_predict_latest_cli(csv_path: str, model_path: str) -> dict[str, float | 
     return result
 
 
-def run_live_paper_cli(csv_path: str = DEFAULT_CSV_PATH, model_path: str = "models/best_model.joblib") -> None:
+def run_live_paper_cli(
+    csv_path: str = DEFAULT_CSV_PATH,
+    model_path: str = "models/best_model.joblib",
+    runtime_settings=None,
+    session_id: str = "manual",
+) -> dict:
     if settings.BOT_MODE == "real":
         settings.validate_trading_mode()
-    if settings.BOT_MODE not in {"paper", "demo", "backtest"}:
-        raise RuntimeError(f"Unsupported live-paper mode: {settings.BOT_MODE}")
+    active_settings = runtime_settings or _runtime_settings(csv_path)
+    if active_settings.BOT_MODE == "real":
+        raise RuntimeError("Real trading is disabled.")
+    if active_settings.BOT_MODE not in {"paper", "demo", "backtest"}:
+        raise RuntimeError(f"Unsupported live-paper mode: {active_settings.BOT_MODE}")
     if not Path(model_path).exists():
         raise FileNotFoundError(f"Model file not found: {model_path}. Run `python -m app.main train` first.")
 
-    runtime_settings = _runtime_settings(csv_path)
-    if runtime_settings.DATA_FEED_SOURCE in {"csv", "mock_realtime"} and not Path(runtime_settings.CANDLES_CSV_PATH).exists():
+    if active_settings.DATA_FEED_SOURCE in {"csv", "mock_realtime"} and not Path(active_settings.CANDLES_CSV_PATH).exists():
         raise FileNotFoundError(
-            f"CSV file not found: {runtime_settings.CANDLES_CSV_PATH}. Expected data/raw/candles.csv for live-paper."
+            f"CSV file not found: {active_settings.CANDLES_CSV_PATH}. Expected data/raw/candles.csv for live-paper."
         )
 
-    data_feed = DataFeedManager(runtime_settings).create_feed()
-    predictor = MLPredictor(model_path)
-    broker = PaperBroker(initial_balance=settings.INITIAL_BALANCE)
+    data_feed = DataFeedManager(active_settings).create_feed()
+    predictor = MLPredictor(model_path, require_demo_eligible=False)
+    broker = PaperBroker(initial_balance=active_settings.INITIAL_BALANCE)
     broker.connect()
     risk_manager = make_risk_manager()
     order_manager = OrderManager(
         broker=broker,
         risk_manager=risk_manager,
-        payout=settings.PAYOUT,
-        expiration_candles=settings.EXPIRATION_CANDLES,
+        payout=active_settings.PAYOUT,
+        expiration_candles=active_settings.EXPIRATION_CANDLES,
     )
-    trade_logger = TradeLogger(settings.TRADE_LOG_PATH)
-    repository = TradesRepository(settings.TRADES_DB_PATH)
+    trade_logger = TradeLogger(active_settings.TRADE_LOG_PATH)
+    repository = TradesRepository(active_settings.TRADES_DB_PATH)
     engine = LiveTradingEngine(
         data_feed=data_feed,
         predictor=predictor,
         order_manager=order_manager,
         trade_logger=trade_logger,
         trades_repository=repository,
-        settings=runtime_settings,
-        candle_storage=CandleStorage(runtime_settings.COLLECTED_CANDLES_PATH),
+        settings=active_settings,
+        candle_storage=CandleStorage(active_settings.COLLECTED_CANDLES_PATH),
+        session_id=session_id,
     )
-    engine.run()
+    return engine.run()
 
 
-def run_summary_cli() -> dict:
-    summary = TradesRepository(settings.TRADES_DB_PATH).get_summary()
-    print("===== TRADING SUMMARY =====")
+def run_summary_cli(session_id: str | None = None, title: str = "TRADING SUMMARY") -> dict:
+    summary = TradesRepository(settings.TRADES_DB_PATH).get_summary(session_id)
+    summary["duplicate_data_window_detected"] = _duplicate_data_window_detected()
+    print(f"===== {title} =====")
+    if session_id:
+        print(f"Session ID: {session_id}")
     print(f"Total trades: {summary['total_trades']}")
     print(f"Wins: {summary['wins']}")
     print(f"Losses: {summary['losses']}")
     print(f"Win rate: {summary['win_rate']:.2%}")
     print(f"Net profit: {summary['net_profit']:.2f}")
     print(f"Current balance: {summary['current_balance']:.2f}")
+    if summary["duplicate_data_window_detected"]:
+        print("WARNING: duplicate data window detected across sessions.")
     return summary
+
+
+def run_summary_current_cli() -> dict:
+    repo = TradesRepository(settings.TRADES_DB_PATH)
+    session = SessionManager(settings.SESSION_STATE_PATH).get_current_session()
+    session_id = (session or {}).get("session_id") if (session or {}).get("status") == "RUNNING" else None
+    session_id = session_id or repo.get_last_session_id()
+    if not session_id:
+        print("No current or previous session found.")
+        return repo.get_summary("__missing__")
+    return run_summary_cli(session_id, "CURRENT SESSION SUMMARY")
+
+
+def run_summary_session_cli(session_id: str) -> dict:
+    return run_summary_cli(session_id, "SESSION SUMMARY")
+
+
+def run_sessions_cli() -> list[dict]:
+    repo_sessions = TradesRepository(settings.TRADES_DB_PATH).get_sessions_summary()
+    history = SessionManager(settings.SESSION_STATE_PATH).list_sessions()
+    sessions = _merge_session_history(repo_sessions, history)
+    current = SessionManager(settings.SESSION_STATE_PATH).get_current_session()
+    if current and not any(item.get("session_id") == current.get("session_id") for item in sessions):
+        sessions.append(
+            {
+                "session_id": current.get("session_id"),
+                "started_at": current.get("started_at"),
+                "ended_at": current.get("ended_at"),
+                "mode": current.get("mode"),
+                "total_trades": 0,
+                "net_profit": 0.0,
+                "current_balance": 0.0,
+            }
+        )
+    if not sessions:
+        print("No sessions found.")
+        return []
+    columns = [
+        "session_id",
+        "started_at",
+        "ended_at",
+        "mode",
+        "total_trades",
+        "net_profit",
+        "current_balance",
+        "data_start_timestamp",
+        "data_end_timestamp",
+        "feed_start_index",
+        "feed_end_index",
+    ]
+    frame = pd.DataFrame(sessions)
+    for column in columns:
+        if column not in frame.columns:
+            frame[column] = None
+    print(frame[columns].to_string(index=False))
+    return sessions
+
+
+def run_reset_paper_logs_cli(confirm: bool = False) -> dict:
+    if not confirm:
+        raise RuntimeError("reset-paper-logs requires --confirm.")
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    archived = []
+    for path_text in [settings.TRADE_LOG_PATH, settings.TRADES_DB_PATH]:
+        path = Path(path_text)
+        if path.exists():
+            archive = path.with_name(f"{path.stem}_{timestamp}{path.suffix}.bak")
+            shutil.move(str(path), str(archive))
+            archived.append(str(archive))
+    TradeLogger(settings.TRADE_LOG_PATH)
+    TradesRepository(settings.TRADES_DB_PATH)
+    result = {"archived": archived, "trade_log": settings.TRADE_LOG_PATH, "trades_db": settings.TRADES_DB_PATH}
+    print(pd.Series(result).to_string())
+    return result
+
+
+def run_feed_status_cli() -> dict:
+    status = get_feed_status(settings)
+    print("===== FEED STATUS =====")
+    print(f"status: {status['status']}")
+    print(f"csv_path: {status['csv_path']}")
+    print(f"total candles: {status['total_candles']}")
+    print(f"cursor last_index: {status['cursor_last_index']}")
+    print(f"cursor last_timestamp: {status['cursor_last_timestamp']}")
+    print(f"remaining candles: {status['remaining_candles']}")
+    print(f"feature_window_size: {status['feature_window_size']}")
+    print(f"estimated usable candles: {status['estimated_usable_candles']}")
+    return status
+
+
+def run_reset_feed_cursor_cli(confirm: bool = False) -> dict:
+    if not confirm:
+        raise RuntimeError("reset-feed-cursor requires --confirm.")
+    path = Path(settings.FEED_CURSOR_PATH)
+    if path.exists():
+        path.unlink()
+    result = {"reset": True, "path": str(path)}
+    print(pd.Series(result).to_string())
+    return result
+
+
+def run_append_candles_cli(source_csv: str) -> dict:
+    source_path = Path(source_csv)
+    target_path = Path(settings.CANDLES_CSV_PATH)
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source candles CSV not found: {source_path}")
+    if not target_path.exists():
+        raise FileNotFoundError(f"Target candles CSV not found: {target_path}")
+
+    existing = normalize_candles(pd.read_csv(target_path), settings.ASSET, settings.TIMEFRAME_SECONDS, "csv")
+    incoming = normalize_candles(pd.read_csv(source_path), settings.ASSET, settings.TIMEFRAME_SECONDS, "csv")
+    before = len(existing)
+    combined = pd.concat([existing, incoming], ignore_index=True)
+    combined = combined.drop_duplicates(subset=["timestamp", "asset", "timeframe_seconds"], keep="first")
+    combined = combined.sort_values("timestamp").reset_index(drop=True)
+    added = len(combined) - before
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(target_path, index=False)
+    result = {"source_csv": str(source_path), "target_csv": str(target_path), "new_candles_added": int(max(0, added)), "total_candles": len(combined)}
+    print(pd.Series(result).to_string())
+    return result
 
 
 def run_collect_data_cli(csv_path: str = DEFAULT_CSV_PATH) -> str:
@@ -385,7 +524,7 @@ def make_demo_broker():
     raise RuntimeError("Demo trading selected, but no authorized demo broker adapter is available.")
 
 
-def run_demo_cli(model_path: str = "models/best_model.joblib") -> None:
+def run_demo_cli(model_path: str = "models/best_model.joblib", session_id: str = "manual") -> None:
     if settings.BOT_MODE == "real":
         settings.validate_trading_mode()
         raise RuntimeError("Real trading is disabled.")
@@ -407,6 +546,7 @@ def run_demo_cli(model_path: str = "models/best_model.joblib") -> None:
         trade_logger=TradeLogger(settings.TRADE_LOG_PATH),
         trades_repository=TradesRepository(settings.TRADES_DB_PATH),
         settings=settings,
+        session_id=session_id,
     )
     print("===== DEMO TRADING =====")
     steps = 0
@@ -562,18 +702,74 @@ def run_validate_cli(csv_path: str = DEFAULT_CSV_PATH) -> dict:
     return {"leakage": leakage, "walk_forward": walk["summary"], "overfitting": overfit, "stability": stability, "report": report}
 
 
-def _session_tools():
-    state = RuntimeState(settings.RUNTIME_STATE_PATH)
-    sessions = SessionManager(settings.SESSION_STATE_PATH)
-    alerts = AlertManager(settings.ALERTS_LOG_PATH)
-    supervisor = BotSupervisor(sessions, state, lambda: run_healthcheck(settings), alerts, settings)
+def _session_tools(active_settings=None):
+    active_settings = active_settings or settings
+    state = RuntimeState(active_settings.RUNTIME_STATE_PATH)
+    sessions = SessionManager(active_settings.SESSION_STATE_PATH)
+    alerts = AlertManager(active_settings.ALERTS_LOG_PATH)
+    supervisor = BotSupervisor(sessions, state, lambda: run_healthcheck(active_settings), alerts, active_settings)
     return sessions, state, supervisor
 
 
 def run_paper_session_cli() -> None:
-    sessions, state, supervisor = _session_tools()
+    if settings.BOT_MODE == "real":
+        settings.validate_trading_mode()
+        raise RuntimeError("Real trading is disabled.")
+    if settings.BOT_MODE != "paper":
+        print(f"WARNING: BOT_MODE is {settings.BOT_MODE}. run-paper-session will run with BOT_MODE=paper internally.")
+    kill = KillSwitch(settings.KILL_SWITCH_PATH)
+    if kill.is_active():
+        message = "Kill switch is active. Run: python -m app.main kill-off"
+        print(message)
+        RuntimeState(settings.RUNTIME_STATE_PATH).save({"bot_status": "BLOCKED", "last_error": message})
+        return
+    paper_settings = _runtime_settings(settings.CANDLES_CSV_PATH, BOT_MODE="paper", BROKER="paper")
+    required_window = max(paper_settings.MIN_CANDLES, paper_settings.FEATURE_WINDOW_SIZE)
+    if paper_settings.LIVE_MAX_STEPS is not None and paper_settings.LIVE_MAX_STEPS < required_window:
+        message = (
+            f"LIVE_MAX_STEPS ({paper_settings.LIVE_MAX_STEPS}) is lower than FEATURE_WINDOW_SIZE/MIN_CANDLES "
+            f"({required_window}). Increase LIVE_MAX_STEPS or lower FEATURE_WINDOW_SIZE for a test run."
+        )
+        print(f"WARNING: {message}")
+        RuntimeState(paper_settings.RUNTIME_STATE_PATH).save({"bot_status": "BLOCKED", "last_error": message})
+        return
+    candle_count = _count_csv_rows(paper_settings.CANDLES_CSV_PATH)
+    if candle_count < required_window:
+        message = (
+            f"Not enough candles for live paper session: {candle_count}/{required_window}. "
+            "Run collect-data or provide a larger candles CSV."
+        )
+        print(message)
+        RuntimeState(paper_settings.RUNTIME_STATE_PATH).save({"bot_status": "BLOCKED", "last_error": message})
+        return
+    feed_status = get_feed_status(paper_settings)
+    if feed_status["status"] == "END_OF_FEED":
+        message = "No remaining candles to run a new paper session."
+        print(message)
+        print("Add more candles to data/raw/candles.csv or run reset-feed-cursor --confirm only if you intentionally want replay.")
+        RuntimeState(paper_settings.RUNTIME_STATE_PATH).save({"bot_status": "BLOCKED", "last_error": message})
+        return
+    remaining = int(feed_status["remaining_candles"])
+    if remaining < required_window + 50:
+        print("WARNING: Not enough remaining candles for a meaningful paper session.")
+    if paper_settings.LIVE_MAX_STEPS is not None and paper_settings.LIVE_MAX_STEPS > remaining:
+        print(f"WARNING: LIVE_MAX_STEPS ({paper_settings.LIVE_MAX_STEPS}) is greater than remaining candles ({remaining}). Using remaining candles only.")
+        paper_settings = paper_settings.model_copy(update={"LIVE_MAX_STEPS": max(1, remaining)})
+    planned = _planned_feed_window(paper_settings, feed_status)
+    if not paper_settings.ALLOW_REPLAY_SAME_WINDOW and _window_already_used(planned, SessionManager(paper_settings.SESSION_STATE_PATH).list_sessions()):
+        message = "Duplicate data window blocked. Set ALLOW_REPLAY_SAME_WINDOW=true only for intentional replay tests."
+        print(message)
+        RuntimeState(paper_settings.RUNTIME_STATE_PATH).save({"bot_status": "BLOCKED", "last_error": message})
+        return
+    sessions, state, supervisor = _session_tools(paper_settings)
     state.update("started_at", pd.Timestamp.utcnow().isoformat())
-    supervisor.run_with_supervision(lambda: run_live_paper_cli(settings.CANDLES_CSV_PATH))
+    supervisor.run_with_supervision(
+        lambda session: run_live_paper_cli(
+            paper_settings.CANDLES_CSV_PATH,
+            runtime_settings=paper_settings,
+            session_id=session["session_id"],
+        )
+    )
     run_daily_report_cli()
 
 
@@ -582,7 +778,7 @@ def run_demo_session_cli() -> None:
         raise RuntimeError("run-demo-session requires BOT_MODE=demo.")
     sessions, state, supervisor = _session_tools()
     state.update("started_at", pd.Timestamp.utcnow().isoformat())
-    supervisor.run_with_supervision(lambda: run_demo_cli())
+    supervisor.run_with_supervision(lambda session: run_demo_cli(session_id=session["session_id"]))
     run_daily_report_cli()
 
 
@@ -600,7 +796,20 @@ def run_runtime_status_cli() -> dict:
         "metrics": metrics,
         "system": system,
     }
-    print(pd.Series({"bot_status": metrics["bot_status"], "kill_switch": result["kill_switch"]["active"], "total_trades": metrics["total_trades"]}).to_string())
+    print(
+        pd.Series(
+            {
+                "bot_status": metrics["bot_status"],
+                "current_session_id": metrics.get("current_session_id"),
+                "last_session_id": metrics.get("last_session_id"),
+                "kill_switch": result["kill_switch"]["active"],
+                "session_trades": metrics.get("session_total_trades"),
+                "historical_trades": metrics.get("historical_total_trades"),
+                "session_net_profit": metrics.get("session_net_profit"),
+                "historical_net_profit": metrics.get("historical_net_profit"),
+            }
+        ).to_string()
+    )
     return result
 
 
@@ -613,8 +822,44 @@ def run_retrain_cli() -> dict:
 
 def run_models_cli() -> list[dict]:
     models = ModelRegistry(settings.MODEL_REGISTRY_PATH).list_models()
-    print(pd.DataFrame(models).to_string(index=False) if models else "No models registered.")
+    if not models:
+        print("No models registered.")
+        return models
+    rows = []
+    for model in models:
+        metrics = model.get("metrics", {})
+        rows.append(
+            {
+                "model_id": model.get("model_id"),
+                "status": model.get("status"),
+                "path": model.get("path"),
+                "created_at": model.get("created_at"),
+                "score": metrics.get("score"),
+                "win_rate": metrics.get("win_rate") or metrics.get("average_win_rate"),
+                "profit_factor": metrics.get("profit_factor") or metrics.get("average_profit_factor"),
+                "recommendation": metrics.get("final_recommendation"),
+            }
+        )
+    print(pd.DataFrame(rows).to_string(index=False))
     return models
+
+
+def run_register_current_model_cli() -> dict:
+    model_path = Path(settings.PRODUCTION_MODEL_PATH)
+    if not model_path.exists():
+        raise FileNotFoundError(f"{settings.PRODUCTION_MODEL_PATH} not found. Run `python -m app.main train` first.")
+    MLPredictor(model_path, require_demo_eligible=False)
+    registry = ModelRegistry(settings.MODEL_REGISTRY_PATH)
+    existing = [model for model in registry.list_models() if Path(model.get("path", "")) == model_path]
+    if existing:
+        print(f"Model already registered: {existing[-1]['model_id']}")
+        return existing[-1]
+    metrics = _current_model_metrics()
+    status = "PRODUCTION" if not registry.get_current_model() else "CANDIDATE"
+    model_id = registry.register_model(str(model_path), metrics, status, validation_report_path="data/logs/final_validation_report.json")
+    result = registry.get_model(model_id)
+    print(pd.Series({"model_id": model_id, "status": status, "path": str(model_path)}).to_string())
+    return result
 
 
 def run_promote_cli(model_id: str) -> dict:
@@ -641,8 +886,8 @@ def run_daily_report_cli() -> dict:
     return report
 
 
-def _runtime_settings(csv_path: str | None = None):
-    updates = {}
+def _runtime_settings(csv_path: str | None = None, **extra_updates):
+    updates = dict(extra_updates)
     if csv_path:
         updates["CANDLES_CSV_PATH"] = csv_path
     return settings.model_copy(update=updates)
@@ -654,6 +899,157 @@ def _invalid_price_count(data: pd.DataFrame) -> int:
         return 0
     prices = data[price_columns].apply(pd.to_numeric, errors="coerce")
     return int((prices <= 0).sum().sum())
+
+
+def _count_csv_rows(path: str) -> int:
+    csv_path = Path(path)
+    if not csv_path.exists():
+        return 0
+    with csv_path.open("r", encoding="utf-8") as file:
+        return max(0, sum(1 for _ in file) - 1)
+
+
+def get_feed_status(active_settings=None) -> dict:
+    active_settings = active_settings or settings
+    total = _count_csv_rows(active_settings.CANDLES_CSV_PATH)
+    feature_window = max(active_settings.MIN_CANDLES, active_settings.FEATURE_WINDOW_SIZE)
+    try:
+        feed = DataFeedManager(active_settings).create_feed()
+        if hasattr(feed, "get_status"):
+            status = feed.get_status()
+            status["status"] = _feed_status_label(status["remaining_candles"], status["feature_window_size"])
+            return status
+    except EndOfFeedError:
+        cursor = _read_feed_cursor(active_settings.FEED_CURSOR_PATH)
+        return {
+            "status": "END_OF_FEED",
+            "csv_path": active_settings.CANDLES_CSV_PATH,
+            "total_candles": total,
+            "cursor_last_index": cursor.get("last_index"),
+            "cursor_last_timestamp": cursor.get("last_timestamp"),
+            "next_start_index": total,
+            "remaining_candles": 0,
+            "feature_window_size": feature_window,
+            "estimated_usable_candles": 0,
+        }
+    return {
+        "status": _feed_status_label(total, feature_window),
+        "csv_path": active_settings.CANDLES_CSV_PATH,
+        "total_candles": total,
+        "cursor_last_index": None,
+        "cursor_last_timestamp": None,
+        "next_start_index": 0,
+        "remaining_candles": total,
+        "feature_window_size": feature_window,
+        "estimated_usable_candles": max(0, total - feature_window),
+    }
+
+
+def _feed_status_label(remaining: int, feature_window: int) -> str:
+    if remaining <= 0:
+        return "END_OF_FEED"
+    if remaining < feature_window:
+        return "NEEDS_MORE_DATA"
+    return "OK"
+
+
+def _read_feed_cursor(path: str) -> dict:
+    cursor_path = Path(path)
+    if not cursor_path.exists():
+        return {}
+    try:
+        return json.loads(cursor_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _planned_feed_window(active_settings, feed_status: dict) -> dict:
+    start_index = int(feed_status.get("next_start_index") or 0)
+    total = int(feed_status.get("total_candles") or 0)
+    steps = active_settings.LIVE_MAX_STEPS or int(feed_status.get("remaining_candles") or 0)
+    end_index = min(max(0, total - 1), start_index + max(0, steps) - 1)
+    timestamps = _timestamp_range_for_indices(active_settings.CANDLES_CSV_PATH, start_index, end_index)
+    return {
+        "feed_start_index": start_index,
+        "feed_end_index": end_index,
+        "data_start_timestamp": timestamps[0],
+        "data_end_timestamp": timestamps[1],
+    }
+
+
+def _timestamp_range_for_indices(csv_path: str, start_index: int, end_index: int) -> tuple[str | None, str | None]:
+    if end_index < start_index or not Path(csv_path).exists():
+        return None, None
+    data = pd.read_csv(csv_path, usecols=["timestamp"])
+    if data.empty:
+        return None, None
+    start_index = min(max(0, start_index), len(data) - 1)
+    end_index = min(max(0, end_index), len(data) - 1)
+    return str(pd.to_datetime(data.iloc[start_index]["timestamp"], errors="coerce")), str(pd.to_datetime(data.iloc[end_index]["timestamp"], errors="coerce"))
+
+
+def _window_already_used(planned: dict, sessions: list[dict]) -> bool:
+    for session in sessions:
+        if (
+            session.get("data_start_timestamp") == planned.get("data_start_timestamp")
+            and session.get("data_end_timestamp") == planned.get("data_end_timestamp")
+            and planned.get("data_start_timestamp") is not None
+        ):
+            return True
+    return False
+
+
+def _duplicate_data_window_detected() -> bool:
+    repo_sessions = TradesRepository(settings.TRADES_DB_PATH).get_sessions_summary()
+    history = SessionManager(settings.SESSION_STATE_PATH).list_sessions()
+    return _has_duplicate_windows(_merge_session_history(repo_sessions, history))
+
+
+def _has_duplicate_windows(sessions: list[dict]) -> bool:
+    seen = set()
+    for session in sessions:
+        start = session.get("data_start_timestamp") or session.get("started_at")
+        end = session.get("data_end_timestamp") or session.get("ended_at")
+        if not start or not end:
+            continue
+        key = (start, end)
+        if key in seen:
+            return True
+        seen.add(key)
+    return False
+
+
+def _merge_session_history(repo_sessions: list[dict], history: list[dict]) -> list[dict]:
+    by_id = {session.get("session_id"): dict(session) for session in history}
+    for session in repo_sessions:
+        session_id = session.get("session_id")
+        merged = by_id.get(session_id, {})
+        merged.update(session)
+        by_id[session_id] = merged
+    return list(by_id.values())
+
+
+def _current_model_metrics() -> dict:
+    report_path = Path("data/logs/final_validation_report.json")
+    if report_path.exists():
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+        wf = report.get("walk_forward_summary", {})
+        stability = report.get("model_stability_report", {})
+        return {
+            "source": "final_validation_report",
+            "final_recommendation": report.get("final_recommendation"),
+            "average_win_rate": wf.get("average_win_rate"),
+            "average_profit_factor": wf.get("average_profit_factor"),
+            "stability_score": stability.get("stability_score"),
+        }
+    metrics_path = Path("data/logs/model_metrics.csv")
+    if metrics_path.exists():
+        metrics = pd.read_csv(metrics_path)
+        if not metrics.empty:
+            best = metrics.sort_values("roc_auc", ascending=False).iloc[0].to_dict()
+            best["source"] = "model_metrics_csv"
+            return best
+    return {"source": "model_artifact_only"}
 
 
 def require_cli_csv(csv_path: str) -> str:
@@ -698,6 +1094,11 @@ if __name__ == "__main__":
             "predict-latest",
             "live-paper",
             "summary",
+            "summary-current",
+            "sessions",
+            "summary-session",
+            "feed-status",
+            "append-candles",
             "collect-data",
             "dashboard",
             "data-quality",
@@ -720,16 +1121,20 @@ if __name__ == "__main__":
             "runtime-status",
             "retrain",
             "models",
+            "register-current-model",
             "promote",
             "rollback",
             "drift-check",
             "daily-report",
+            "reset-paper-logs",
+            "reset-feed-cursor",
         ],
     )
     parser.add_argument("--csv", default=DEFAULT_CSV_PATH, help="Path to candles CSV")
     parser.add_argument("--output", default=None, help="Output CSV for trades or model path")
     parser.add_argument("--model", default="models/best_model.joblib", help="Model path for strategy comparison")
     parser.add_argument("reason", nargs="?", default="", help="Reason for kill-on")
+    parser.add_argument("--confirm", action="store_true", help="Confirm destructive maintenance commands")
     args = parser.parse_args()
 
     if args.command == "backtest":
@@ -747,6 +1152,16 @@ if __name__ == "__main__":
         run_live_paper_cli(args.csv, args.model)
     elif args.command == "summary":
         run_summary_cli()
+    elif args.command == "summary-current":
+        run_summary_current_cli()
+    elif args.command == "sessions":
+        run_sessions_cli()
+    elif args.command == "summary-session":
+        run_summary_session_cli(args.reason)
+    elif args.command == "feed-status":
+        run_feed_status_cli()
+    elif args.command == "append-candles":
+        run_append_candles_cli(args.reason)
     elif args.command == "collect-data":
         run_collect_data_cli(args.csv)
     elif args.command == "data-quality":
@@ -789,6 +1204,8 @@ if __name__ == "__main__":
         run_retrain_cli()
     elif args.command == "models":
         run_models_cli()
+    elif args.command == "register-current-model":
+        run_register_current_model_cli()
     elif args.command == "promote":
         run_promote_cli(args.reason)
     elif args.command == "rollback":
@@ -797,5 +1214,9 @@ if __name__ == "__main__":
         run_drift_check_cli()
     elif args.command == "daily-report":
         run_daily_report_cli()
+    elif args.command == "reset-paper-logs":
+        run_reset_paper_logs_cli(args.confirm)
+    elif args.command == "reset-feed-cursor":
+        run_reset_feed_cursor_cli(args.confirm)
     else:
         run_dashboard_cli()

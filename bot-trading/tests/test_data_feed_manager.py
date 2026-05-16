@@ -16,6 +16,10 @@ def settings(source, csv_path):
         ASSET="EURUSD-OTC",
         TIMEFRAME_SECONDS=60,
         LIVE_MAX_STEPS=10,
+        FEED_CURSOR_PATH=str(csv_path.parent / "feed_cursor.json"),
+        RESET_FEED_CURSOR=False,
+        RANDOM_FEED_START=False,
+        FEED_START_INDEX=None,
     )
 
 

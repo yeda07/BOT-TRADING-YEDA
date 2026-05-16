@@ -1,11 +1,12 @@
 class DemoExecutor:
-    def __init__(self, broker, execution_guard, risk_manager, trade_logger, trades_repository, settings):
+    def __init__(self, broker, execution_guard, risk_manager, trade_logger, trades_repository, settings, session_id: str = "manual"):
         self.broker = broker
         self.execution_guard = execution_guard
         self.risk_manager = risk_manager
         self.trade_logger = trade_logger
         self.trades_repository = trades_repository
         self.settings = settings
+        self.session_id = session_id or "manual"
 
     def execute(self, signal: str, confidence: float, asset: str, candle) -> dict:
         timestamp = candle.get("timestamp")
@@ -38,6 +39,7 @@ class DemoExecutor:
 
     def _trade(self, order: dict, timestamp, signal: str, confidence: float, entry_price: float, result: str, profit: float) -> dict:
         return {
+            "session_id": self.session_id,
             "timestamp": timestamp,
             "asset": order["asset"],
             "signal": signal,

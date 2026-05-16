@@ -14,6 +14,7 @@ class LiveTradingEngine:
         trades_repository,
         settings,
         candle_storage=None,
+        session_id: str = "manual",
     ):
         self.data_feed = data_feed
         self.predictor = predictor
@@ -22,15 +23,18 @@ class LiveTradingEngine:
         self.trades_repository = trades_repository
         self.settings = settings
         self.candle_storage = candle_storage
+        self.session_id = session_id or "manual"
 
-    def run(self) -> None:
+    def run(self) -> dict:
         print("===== LIVE PAPER TRADING =====")
         print(f"Asset: {self.settings.ASSET}")
         print(f"Mode: {self.settings.BOT_MODE}")
+        print(f"Session: {self.session_id}")
         print(f"Balance: {self.order_manager.broker.get_balance():.2f}")
 
         steps = 0
         max_steps = self.settings.LIVE_MAX_STEPS
+        required_window = self._required_window()
         self.data_feed.connect()
         try:
             while self.data_feed.has_next() and (max_steps is None or steps < max_steps):
@@ -39,6 +43,10 @@ class LiveTradingEngine:
                     self.candle_storage.append_candle(latest_candle)
                 window = self.data_feed.get_latest_candles()
                 steps += 1
+
+                if len(window) < required_window:
+                    print(f"Warm-up: current candles {len(window)} / required {required_window}")
+                    continue
 
                 valid, errors = validate_candles_df(window) if not window.empty else (False, ["No candles available."])
                 if not valid:
@@ -54,15 +62,17 @@ class LiveTradingEngine:
                     time.sleep(self.settings.LIVE_SLEEP_SECONDS)
         finally:
             self.data_feed.disconnect()
+        return self._session_feed_metadata()
 
     def _process_window(self, window, latest_candle) -> dict | None:
-        if len(window) < self.settings.MIN_CANDLES:
+        required_window = self._required_window()
+        if len(window) < required_window:
             result = {
                 "status": "SKIPPED",
                 "signal": "HOLD",
                 "confidence": 0.0,
                 "amount": 0.0,
-                "reason": "Not enough candles for live decision.",
+                "reason": f"Not enough candles for live decision. Need {required_window}.",
                 "timestamp": latest_candle.get("timestamp"),
                 "entry_price": latest_candle.get("close"),
             }
@@ -142,6 +152,7 @@ class LiveTradingEngine:
 
     def _trade_record(self, execution: dict, exit_price, result: str, profit: float, balance: float) -> dict:
         return {
+            "session_id": self.session_id,
             "timestamp": execution.get("timestamp"),
             "asset": self.settings.ASSET,
             "signal": execution.get("signal"),
@@ -171,3 +182,27 @@ class LiveTradingEngine:
         print(f"Result: {resolution.get('status')}")
         print(f"Profit: {float(resolution.get('profit', 0.0)):.2f}")
         print(f"New Balance: {float(resolution.get('balance', 0.0)):.2f}")
+
+    def _required_window(self) -> int:
+        min_candles = int(getattr(self.settings, "MIN_CANDLES", 200))
+        feature_window = int(getattr(self.settings, "FEATURE_WINDOW_SIZE", min_candles))
+        return max(min_candles, feature_window)
+
+    def _session_feed_metadata(self) -> dict:
+        data = getattr(self.data_feed, "_data", None)
+        start_index = getattr(self.data_feed, "start_index", None)
+        end_index = getattr(self.data_feed, "end_index", None)
+        candle_count = 0
+        start_timestamp = None
+        end_timestamp = None
+        if data is not None and start_index is not None and end_index is not None and end_index >= start_index:
+            candle_count = int(end_index - start_index + 1)
+            start_timestamp = str(data.iloc[start_index].get("timestamp"))
+            end_timestamp = str(data.iloc[end_index].get("timestamp"))
+        return {
+            "data_start_timestamp": start_timestamp,
+            "data_end_timestamp": end_timestamp,
+            "feed_start_index": start_index,
+            "feed_end_index": end_index,
+            "candle_count_processed": candle_count,
+        }

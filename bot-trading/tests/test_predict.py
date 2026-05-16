@@ -1,6 +1,8 @@
 import joblib
 import pandas as pd
 import pytest
+from sklearn.linear_model import LogisticRegression
+from sklearn.pipeline import Pipeline
 
 from app.market.features import FEATURE_COLUMNS
 from app.ml.predict import MLPredictor, predict_latest
@@ -66,3 +68,48 @@ def test_ml_predictor_predicts_dataframe(tmp_path):
 def test_ml_predictor_missing_model_has_controlled_error(tmp_path):
     with pytest.raises(FileNotFoundError, match="Run `python -m app.main train` first"):
         MLPredictor(tmp_path / "missing.joblib")
+
+
+def test_ml_predictor_uses_artifact_model_not_best_model_metadata(tmp_path):
+    X = pd.DataFrame(
+        [
+            [float(i + j) for j in range(len(FEATURE_COLUMNS))]
+            for i in range(12)
+        ],
+        columns=FEATURE_COLUMNS,
+    )
+    y = [0, 1] * 6
+    pipeline = Pipeline([("model", LogisticRegression(max_iter=1000))])
+    pipeline.fit(X, y)
+
+    path = tmp_path / "best_model.joblib"
+    joblib.dump(
+        {
+            "model": pipeline,
+            "best_model": "ExtraTreesClassifier",
+            "features": FEATURE_COLUMNS,
+            "min_confidence": 0.58,
+        },
+        path,
+    )
+
+    predictor = MLPredictor(path, require_demo_eligible=False)
+
+    assert isinstance(predictor.model, Pipeline)
+    assert predictor.predict_row(X.iloc[-1])["signal"] in {"BUY", "SELL", "HOLD"}
+
+
+def test_ml_predictor_rejects_string_model_artifact(tmp_path):
+    path = tmp_path / "best_model.joblib"
+    joblib.dump({"model": "ExtraTreesClassifier", "features": FEATURE_COLUMNS}, path)
+
+    with pytest.raises(ValueError, match=r"artifact\['model'\] must be an estimator, got str"):
+        MLPredictor(path, require_demo_eligible=False)
+
+
+def test_ml_predictor_rejects_missing_or_empty_features(tmp_path):
+    path = tmp_path / "best_model.joblib"
+    joblib.dump({"model": ProbModel(0.70), "features": []}, path)
+
+    with pytest.raises(ValueError, match="features must be a non-empty list"):
+        MLPredictor(path, require_demo_eligible=False)

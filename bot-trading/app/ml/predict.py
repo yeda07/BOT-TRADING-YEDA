@@ -9,16 +9,18 @@ from app.ml.promotion_gate import assert_artifact_eligible_for_demo
 
 
 class MLPredictor:
-    def __init__(self, model_path: str | Path = "models/best_model.joblib") -> None:
+    def __init__(self, model_path: str | Path = "models/best_model.joblib", require_demo_eligible: bool | None = None) -> None:
         self.model_path = Path(model_path)
         if not self.model_path.exists():
             raise FileNotFoundError(f"Model file not found: {self.model_path}. Run `python -m app.main train` first.")
         artifact = joblib.load(self.model_path)
         settings = get_settings()
-        if settings.BOT_MODE == "demo":
+        if require_demo_eligible is None:
+            require_demo_eligible = settings.BOT_MODE == "demo"
+        if require_demo_eligible:
             assert_artifact_eligible_for_demo(artifact)
-        self.model = artifact["model"] if isinstance(artifact, dict) and "model" in artifact else artifact
-        self.features = artifact.get("features", FEATURE_COLUMNS) if isinstance(artifact, dict) else FEATURE_COLUMNS
+        self.model = _extract_model(artifact)
+        self.features = _extract_features(artifact)
         self.min_confidence = artifact.get("min_confidence", settings.MIN_CONFIDENCE) if isinstance(artifact, dict) else settings.MIN_CONFIDENCE
 
     def predict_row(self, row: pd.Series) -> dict[str, float | str]:
@@ -72,3 +74,28 @@ def _probability_up(model, X: pd.DataFrame) -> float:
         if 1 in classes:
             return float(probabilities[classes.index(1)])
     return float(int(model.predict(X)[0]))
+
+
+def _extract_model(artifact):
+    if isinstance(artifact, dict):
+        if "model" not in artifact:
+            raise ValueError("Invalid model artifact: missing artifact['model'].")
+        model = artifact["model"]
+    else:
+        model = artifact
+    _validate_model(model)
+    return model
+
+
+def _validate_model(model) -> None:
+    if isinstance(model, str):
+        raise ValueError("Invalid model artifact: artifact['model'] must be an estimator, got str")
+    if not (hasattr(model, "predict") or hasattr(model, "predict_proba")):
+        raise ValueError("Invalid model artifact: artifact['model'] must implement predict or predict_proba.")
+
+
+def _extract_features(artifact) -> list[str]:
+    features = artifact.get("features") if isinstance(artifact, dict) else FEATURE_COLUMNS
+    if not isinstance(features, list) or not features:
+        raise ValueError("Invalid model artifact: features must be a non-empty list.")
+    return features

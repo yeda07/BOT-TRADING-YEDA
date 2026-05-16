@@ -12,6 +12,7 @@ def test_daily_report_builder_generates_json_and_markdown(tmp_path):
         BROKER="paper",
         ASSET="EURUSD-OTC",
         PAYOUT=0.87,
+        SESSION_STATE_PATH=str(tmp_path / "session.json"),
         KILL_SWITCH_PATH=str(tmp_path / "kill.json"),
         DRIFT_MIN_TRADES=100,
         DRIFT_WIN_RATE_DROP=0.05,
@@ -23,5 +24,7 @@ def test_daily_report_builder_generates_json_and_markdown(tmp_path):
     report = DailyReportBuilder(repo, settings).build()
 
     assert report["asset"] == "EURUSD-OTC"
+    assert "session_id" in report
+    assert "session_profit" in report
     assert list((tmp_path / "reports").glob("daily_report_*.json"))
     assert list((tmp_path / "reports").glob("daily_report_*.md"))

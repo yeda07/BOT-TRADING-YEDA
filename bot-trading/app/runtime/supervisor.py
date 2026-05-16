@@ -1,3 +1,5 @@
+import inspect
+
 from app.execution.kill_switch import KillSwitch
 
 
@@ -18,6 +20,8 @@ class BotSupervisor:
             self.settings.BROKER,
             self.settings.DATA_FEED_SOURCE,
         )
+        self.runtime_state.update("current_session_id", session["session_id"])
+        self.runtime_state.update("last_session_id", session["session_id"])
         self.runtime_state.update("bot_status", "RUNNING")
         try:
             KillSwitch(self.settings.KILL_SWITCH_PATH)
@@ -25,7 +29,12 @@ class BotSupervisor:
                 report = self.healthcheck()
                 if report.get("status") == "ERROR":
                     raise RuntimeError("Healthcheck failed.")
-            engine_callable()
+            if len(inspect.signature(engine_callable).parameters) >= 1:
+                result = engine_callable(session)
+            else:
+                result = engine_callable()
+            if isinstance(result, dict):
+                self.session_manager.update_session(session["session_id"], result)
             self.session_manager.save_heartbeat(session["session_id"])
             self.runtime_state.update("bot_status", "STOPPED")
             self.session_manager.end_session(session["session_id"], "completed")

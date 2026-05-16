@@ -6,7 +6,6 @@
   "current_balance": 0.0,
   "consecutive_losses": 0,
   "total_trades": 0,
-  "last_error": "ML model is blocked from demo mode. Observed test metrics: win_rate=0.00%, profit_factor=0.000, roc_auc=0.000, total_trades=0, max_drawdown=0.00%.",
-  "bot_status": "STOPPED",
-  "started_at": "2026-05-15T12:17:06.028021+00:00"
+  "last_error": "No remaining candles to run a new paper session.",
+  "bot_status": "BLOCKED"
 }

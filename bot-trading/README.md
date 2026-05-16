@@ -550,6 +550,63 @@ Los volumenes montan `./data` y `./models`. Docker no inicia trading real automa
 
 Un sistema estable en demo no garantiza ganancias reales. Antes de considerar cualquier entorno real se requieren semanas de ejecucion controlada, revision humana, cumplimiento de reglas del broker y analisis de riesgo.
 
+## Troubleshooting run-paper-session
+
+Comando recomendado:
+
+```bash
+python -m app.main kill-off
+python -m app.main register-current-model
+python -m app.main models
+python -m app.main healthcheck
+python -m app.main run-paper-session
+python -m app.main runtime-status
+python -m app.main summary
+```
+
+Problemas comunes:
+
+- `Kill switch ON`: desactivalo solo si entiendes la causa.
+
+```bash
+python -m app.main kill-status
+python -m app.main kill-off
+```
+
+- `Mode: backtest` en una sesion paper: revisa `.env`. `run-paper-session` fuerza `BOT_MODE=paper` internamente, pero `healthcheck` avisara si `.env` sigue en `backtest` o tiene claves duplicadas como `BOT_MODE` repetido.
+
+```env
+BOT_MODE=paper
+BROKER=paper
+DATA_FEED_SOURCE=mock_realtime
+```
+
+- `Not enough candles for live decision`: el motor hace warm-up antes de generar señales. Por defecto requiere:
+
+```env
+MIN_CANDLES=200
+FEATURE_WINDOW_SIZE=300
+LIVE_MAX_STEPS=400
+```
+
+Si `LIVE_MAX_STEPS < FEATURE_WINDOW_SIZE`, la sesion terminara antes de poder operar. Sube `LIVE_MAX_STEPS` o usa un CSV con mas velas.
+
+- `total_trades = 0`: puede ser warm-up incompleto, todas las señales `HOLD`, confianza baja, risk manager bloqueando, kill switch activo o modelo no registrado/aprobado.
+
+- `No models registered`: registra el modelo actual sin reemplazar nada:
+
+```bash
+python -m app.main register-current-model
+python -m app.main models
+```
+
+- `NEEDS_MORE_DATA` en `retrain`: es aceptable cuando `data/raw/collected_candles.csv` no tiene suficientes velas nuevas. Recolecta mas datos paper/demo antes de reentrenar.
+
+```bash
+python -m app.main collect-data
+python -m app.main retrain
+```
+
 ## Comparar Reglas vs ML
 
 Compara la estrategia por reglas contra la estrategia ML usando el mismo motor de backtesting:
@@ -654,3 +711,52 @@ docker compose up
 - Añadir monitoreo de drift de datos y performance.
 - Implementar conexión demo mediante APIs oficiales y permitidas por cada broker.
 - Agregar CI para ejecutar `pytest` en cada cambio.
+## Session-based metrics
+
+Paper/demo execution now stores a `session_id` in both `data/logs/live_trades.csv` and `data/logs/trades.db`. This prevents mixing a visible session balance with historical profit from older sessions.
+
+Use:
+
+```bash
+python -m app.main summary
+python -m app.main summary-current
+python -m app.main sessions
+python -m app.main summary-session SESSION_ID
+```
+
+`summary` reports all historical executed trades. `summary-current` reports the active session, or the latest session if the bot is stopped. `summary-session SESSION_ID` reports only that session. Win rate and net profit count only resolved trades with `WON` or `LOST`; `HOLD`, `SKIPPED`, `BLOCKED` and `ERROR` are not counted as executed trades.
+
+If you want to start a clean paper test, archive logs explicitly:
+
+```bash
+python -m app.main reset-paper-logs --confirm
+```
+
+This archives `live_trades.csv` and `trades.db` with timestamped `.bak` names, then creates fresh files. It never deletes logs automatically.
+
+## Feed cursor and replay protection
+
+`run-paper-session` with `DATA_FEED_SOURCE=mock_realtime` now persists progress in `data/logs/feed_cursor.json`. A new paper session continues from the last consumed candle instead of replaying the same CSV window.
+
+Useful commands:
+
+```bash
+python -m app.main feed-status
+python -m app.main append-candles path/to/new_candles.csv
+python -m app.main reset-feed-cursor --confirm
+python -m app.main sessions
+```
+
+Relevant `.env` options:
+
+```env
+FEED_CURSOR_PATH=data/logs/feed_cursor.json
+RESET_FEED_CURSOR=false
+RANDOM_FEED_START=false
+FEED_START_INDEX=
+ALLOW_REPLAY_SAME_WINDOW=false
+```
+
+Keep `ALLOW_REPLAY_SAME_WINDOW=false` for normal paper testing. Enable replay only when intentionally debugging the same historical slice; otherwise historical summaries will accumulate duplicated, non-independent trades.
+
+When `feed-status` reports `END_OF_FEED`, add more historical candles with `append-candles` or intentionally reset the cursor with `reset-feed-cursor --confirm`. A second paper session will not start if there are no remaining candles.

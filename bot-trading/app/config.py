@@ -2,7 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     MIN_MODEL_CONFIDENCE: float = 0.58
 
     MIN_CANDLES: int = 200
+    FEATURE_WINDOW_SIZE: int = Field(default=300, ge=60)
     MAX_VOLATILITY_MULTIPLIER: float = 3.0
     LATERAL_MARKET_ADX_THRESHOLD: float = 18.0
 
@@ -49,10 +50,15 @@ class Settings(BaseSettings):
     DATA_FEED_SOURCE: DataFeedSource = "mock_realtime"
     CANDLES_CSV_PATH: str = "data/raw/candles.csv"
     COLLECTED_CANDLES_PATH: str = "data/raw/collected_candles.csv"
-    LIVE_MAX_STEPS: int | None = Field(default=100, ge=1)
+    LIVE_MAX_STEPS: int | None = Field(default=400, ge=1)
     LIVE_SLEEP_SECONDS: float = Field(default=1.0, ge=0.0)
     TRADE_LOG_PATH: str = "data/logs/live_trades.csv"
     TRADES_DB_PATH: str = "data/logs/trades.db"
+    FEED_CURSOR_PATH: str = "data/logs/feed_cursor.json"
+    RESET_FEED_CURSOR: bool = False
+    RANDOM_FEED_START: bool = False
+    FEED_START_INDEX: int | None = None
+    ALLOW_REPLAY_SAME_WINDOW: bool = False
     KILL_SWITCH_PATH: str = "data/logs/kill_switch.json"
     EXECUTION_STATE_PATH: str = "data/logs/execution_state.json"
     ALERTS_LOG_PATH: str = "data/logs/alerts.log"
@@ -72,6 +78,7 @@ class Settings(BaseSettings):
     RUNTIME_STATE_PATH: str = "data/logs/runtime_state.json"
     MODEL_REGISTRY_PATH: str = "models/model_registry.json"
     MODEL_VERSIONS_DIR: str = "models/versions"
+    PRODUCTION_MODEL_PATH: str = "models/best_model.joblib"
     REPORTS_DIR: str = "data/reports"
     RETRAIN_MIN_NEW_CANDLES: int = Field(default=1000, ge=1)
     AUTO_PROMOTE_MODELS: bool = False
@@ -91,6 +98,11 @@ class Settings(BaseSettings):
         if self.BOT_MODE == "real" and not self.ENABLE_REAL_TRADING:
             raise RuntimeError("Real trading is disabled by default.")
         return self
+
+    @field_validator("FEED_START_INDEX", mode="before")
+    @classmethod
+    def empty_feed_start_index_is_none(cls, value):
+        return None if value == "" else value
 
 
 @lru_cache
